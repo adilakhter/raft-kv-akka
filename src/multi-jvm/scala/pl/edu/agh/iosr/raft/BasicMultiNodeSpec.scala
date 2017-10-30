@@ -1,12 +1,10 @@
-package com.packt.akka
+package pl.edu.agh.iosr.raft
 
-import org.scalatest.matchers.MustMatchers
-import org.scalatest.{ BeforeAndAfterAll, FlatSpecLike }
 import akka.remote.testkit.MultiNodeSpecCallbacks
+import org.scalatest.{BeforeAndAfterAll, FlatSpecLike}
 
 trait BasicMultiNodeSpec extends MultiNodeSpecCallbacks
                           with FlatSpecLike
-                          with MustMatchers
                           with BeforeAndAfterAll {
   override def beforeAll = multiNodeSpecBeforeAll()
 

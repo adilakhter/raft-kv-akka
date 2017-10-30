@@ -1,6 +1,6 @@
-package com.packt.akka
+package pl.edu.agh.iosr.raft
 
-import akka.actor.{ Actor, ActorRef, ActorSystem, Props }
+import akka.actor.Actor
 
 class Worker extends Actor {
   import Worker._

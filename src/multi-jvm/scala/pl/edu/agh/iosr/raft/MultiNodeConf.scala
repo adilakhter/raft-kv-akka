@@ -1,7 +1,6 @@
-package com.packt.akka
+package pl.edu.agh.iosr.raft
 
 import akka.remote.testkit.MultiNodeConfig
-import com.typesafe.config.{ ConfigObject, ConfigFactory, Config }
 
 object MultiNodeSampleConfig extends MultiNodeConfig {
   val node1 = role("node1")

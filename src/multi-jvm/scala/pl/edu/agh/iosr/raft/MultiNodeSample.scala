@@ -1,9 +1,9 @@
-package com.packt.akka
+package pl.edu.agh.iosr.raft
 
+import akka.actor.Props
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit.ImplicitSender
-import akka.actor.{ Props, Actor }
-import MultiNodeSampleConfig._
+import pl.edu.agh.iosr.raft.MultiNodeSampleConfig._
 
 
 class MultiNodeSample extends MultiNodeSpec(MultiNodeSampleConfig)
