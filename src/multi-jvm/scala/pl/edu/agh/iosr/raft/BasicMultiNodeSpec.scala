@@ -1,4 +1,4 @@
-package com.packt.akka
+package pl.edu.agh.iosr.raft
 
 import akka.remote.testkit.MultiNodeSpecCallbacks
 import org.scalatest.{BeforeAndAfterAll, FlatSpecLike}

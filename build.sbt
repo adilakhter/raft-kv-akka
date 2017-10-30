@@ -7,6 +7,7 @@ val Versions = new {
 }
 
 name := "raft-kv-akka"
+organization := "pl.edu.agh"
 version := "0.1-SNAPSHOT"
 scalaVersion := "2.12.3"
 
