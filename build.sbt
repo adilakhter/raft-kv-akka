@@ -1,36 +1,38 @@
-import com.typesafe.sbt.SbtMultiJvm
-import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+import com.typesafe.sbt.SbtMultiJvm.multiJvmSettings
 
-val akkaVersion = "2.4.0"
+val Versions = new {
+  val Akka = "2.4.0"
+  val Scalatest = "2.2.4"
+}
 
-val project = Project(
-  id = "akka-sample-multi-node-scala",
-  base = file("."),
-  settings = Project.defaultSettings ++ SbtMultiJvm.multiJvmSettings ++ Seq(
-    name := "cluster-multi-node-testing",
-    version := "2.3.11",
-    scalaVersion := "2.11.7",
-    sbtVersion := "0.13.5",
-    libraryDependencies ++= Seq(
-      "com.typesafe.akka" %% "akka-remote" % akkaVersion,
-      "com.typesafe.akka" %% "akka-multi-node-testkit" % akkaVersion,
-      "org.scalatest" %% "scalatest" % "2.2.4"),
-    // make sure that MultiJvm test are compiled by the default test compilation
-    compile in MultiJvm <<= (compile in MultiJvm) triggeredBy (compile in Test),
-    // disable parallel tests
-    parallelExecution in Test := false,
-    // make sure that MultiJvm tests are executed by the default test target, 
-    // and combine the results from ordinary test and multi-jvm tests
-    executeTests in Test <<= (executeTests in Test, executeTests in MultiJvm) map {
-      case (testResults, multiNodeResults)  =>
-        val overall =
-          if (testResults.overall.id < multiNodeResults.overall.id)
-            multiNodeResults.overall
-          else
-            testResults.overall
-        Tests.Output(overall,
-          testResults.events ++ multiNodeResults.events,
-          testResults.summaries ++ multiNodeResults.summaries)
-    }
-  )
-) configs (MultiJvm)
+name := "raft-kv-akka"
+version := "0.1-SNAPSHOT"
+scalaVersion := "2.11.7"
+
+libraryDependencies ++= Seq(
+  "com.typesafe.akka" %% "akka-remote" % Versions.Akka,
+  "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
+  "org.scalatest" %% "scalatest" % Versions.Scalatest
+)
+
+//enable multi-jvm testing
+multiJvmSettings
+configs(MultiJvm)
+
+// disable parallel tests
+parallelExecution in Test := false
+
+// make sure that MultiJvm tests are executed by the default test target,
+// and combine the results from ordinary test and multi-jvm tests
+executeTests in Test := /*(executeTests in Test, executeTests in MultiJvm) map*/ {
+  val testResults = (executeTests in Test).value
+  val multiNodeResults = (executeTests in MultiJvm).value
+  val overall =
+    if (testResults.overall.id < multiNodeResults.overall.id)
+      multiNodeResults.overall
+    else
+      testResults.overall
+  Tests.Output(overall,
+    testResults.events ++ multiNodeResults.events,
+    testResults.summaries ++ multiNodeResults.summaries)
+}
