@@ -66,13 +66,22 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   private def broadcast(msg: Any): Unit = ???
 
-  def follower(nomination: Cancellable = system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)): Receive = {
+  def follower(nomination: Cancellable =
+               system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
+              ): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
     case AppendEntries(term, _, prevLogIndex, _, _, _) if term < currentTerm || log.size < prevLogIndex =>
       sender() ! AppendEntriesResult(currentTerm, success = false)
     case AppendEntries(term, _, prevLogIndex, _, leaderCommit, entries) =>
-      if (leaderCommit > lastApplied) lastApplied = leaderCommit
+      currentTerm = term // >= here
+      nomination.cancel()
+
+      //If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
+      if (commitIndex > lastApplied) {
+        lastApplied = commitIndex
+        //todo apply to state machine
+      }
 
       //3. If an existing entry conflicts with a new one (same index but different terms),
       //   delete the existing entry and all that follow it (§5.3)
@@ -89,6 +98,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
         log.reduceToSize(prevLogIndex + idx)
         log ++= maybeConflicting.drop(idx)
       }
+
       //4. Append any new entries not already in the log
       log ++= newEntries
 
@@ -98,19 +108,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       //1. Reply false if term < currentTerm (§5.1)
       //2. If votedFor is null or candidateId, and candidate’s log is
       //   at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-      sender() ! RequestVoteResult(currentTerm, term >= currentTerm && votedFor.forall(_ == candidateId))
-    /*    case StandForElection =>
-      term = term.copy(term.value+1)
-      broadcast(RequestVote)
-      self ! Vote
-      become(candidate())
-    case AppendEntries(_, entries) =>
       nomination.cancel()
-      handleEntries()
-      become(follower())
-    case RequestVote if !voted =>
-      voted = true
-      sender() ! Vote*/
+      sender() ! RequestVoteResult(currentTerm, term >= currentTerm && votedFor.forall(_ == candidateId))
+    case StandForElection =>
+      //election timeout elapsed, start election:
+      currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
+      self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
+      broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
+      become(candidate())
   }
 
   def candidate(): Receive = {
@@ -159,7 +164,7 @@ object RaftActor {
     * @param leaderCommit leader’s commitIndex
     * @param entries      log entries to store (empty for heartbeat; may send more than one for efficiency)
     */
-  final case class AppendEntries(term: Term, leaderId: Id, prevLogIndex: Int, prevLogTerm: Int, leaderCommit: Int, entries: Vector[Entry])
+  final case class AppendEntries(term: Term, leaderId: Id, prevLogIndex: Int, prevLogTerm: Term, leaderCommit: Int, entries: Vector[Entry])
 
   /**
     * Result of AppendEntriesRPC
@@ -177,7 +182,7 @@ object RaftActor {
     * @param lastLogIndex index of candidate’s last log entry (§5.4)
     * @param lastLogTerm  term of candidate’s last log entry (§5.4)
     */
-  final case class RequestVote(term: Term, candidateId: Id, lastLogIndex: Int, lastLogTerm: Int)
+  final case class RequestVote(term: Term, candidateId: Id, lastLogIndex: Int, lastLogTerm: Term)
 
   /**
     * Result of RequestVoteRPC
