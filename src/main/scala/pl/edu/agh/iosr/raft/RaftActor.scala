@@ -20,7 +20,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   /**
     * candidateId that received vote in current term
     */
-  var votedFor = false
+  var votedFor: Option[Id] = None
 
   /**
     * log entries; each entry contains command for state machine,
@@ -94,7 +94,11 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
       //5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
       if (leaderCommit > commitIndex) commitIndex = math.min(leaderCommit, log.size - 1)
-
+    case RequestVote(term, candidateId, lastLogIndex, lastLogTerm) =>
+      //1. Reply false if term < currentTerm (§5.1)
+      //2. If votedFor is null or candidateId, and candidate’s log is
+      //   at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+      sender() ! RequestVoteResult(currentTerm, term >= currentTerm && votedFor.forall(_ == candidateId))
     /*    case StandForElection =>
       term = term.copy(term.value+1)
       broadcast(RequestVote)
