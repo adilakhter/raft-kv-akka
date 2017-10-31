@@ -15,7 +15,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   /**
     * latest term server has seen
     */
-  var term = Term(0)
+  var currentTerm = Term(0)
 
   /**
     * candidateId that received vote in current term
@@ -67,7 +67,34 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   private def broadcast(msg: Any): Unit = ???
 
   def follower(nomination: Cancellable = system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)): Receive = {
-    ???
+    //1. Reply false if term < currentTerm (§5.1)
+    //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+    case AppendEntries(term, _, prevLogIndex, _, _, _) if term < currentTerm || log.size < prevLogIndex =>
+      sender() ! AppendEntriesResult(currentTerm, success = false)
+    case AppendEntries(term, _, prevLogIndex, _, leaderCommit, entries) =>
+      if (leaderCommit > lastApplied) lastApplied = leaderCommit
+
+      //3. If an existing entry conflicts with a new one (same index but different terms),
+      //   delete the existing entry and all that follow it (§5.3)
+      val existing = log.view(prevLogIndex + 1, log.size)
+      val (maybeConflicting, newEntries) = entries.splitAt(existing.size)
+      val conflictIdx = Option(
+        existing
+          .zip(maybeConflicting)
+          .indexWhere {
+            case (current, incoming) => current.term != incoming.term
+          }
+      ).filter(_ != -1)
+      conflictIdx.foreach { idx =>
+        log.reduceToSize(prevLogIndex + idx)
+        log ++= maybeConflicting.drop(idx)
+      }
+      //4. Append any new entries not already in the log
+      log ++= newEntries
+
+      //5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+      if (leaderCommit > commitIndex) commitIndex = math.min(leaderCommit, log.size - 1)
+
     /*    case StandForElection =>
       term = term.copy(term.value+1)
       broadcast(RequestVote)
@@ -112,7 +139,9 @@ final case class Term(value: Int) extends AnyVal with Ordered[Term] {
   override def compare(that: Term) = value.compareTo(that.value)
 }
 
-trait Entry
+trait Entry {
+  def term: Term
+}
 
 object RaftActor {
 
