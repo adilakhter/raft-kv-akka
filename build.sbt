@@ -3,18 +3,18 @@ import sbt.protocol.testing.TestResult.{Failed, Passed}
 
 val Versions = new {
   val Akka = "2.5.6"
-  val Scalatest = "3.0.4"
+  val ScalaTest = "3.0.4"
 }
 
 name := "raft-kv-akka"
 organization := "pl.edu.agh"
 version := "0.1-SNAPSHOT"
-scalaVersion := "2.12.3"
+scalaVersion := "2.12.4"
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-remote" % Versions.Akka,
   "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
-  "org.scalatest" %% "scalatest" % Versions.Scalatest
+  "org.scalatest" %% "scalatest" % Versions.ScalaTest
 )
 
 //enable multi-jvm testing
