@@ -57,18 +57,11 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   override def receive: Receive = follower()
 
-
-  private def handleEntries(): Unit = {
-    ???
-  }
-
   private def nodes(): Int = ???
 
   private def broadcast(msg: Any): Unit = ???
 
-  def follower(nomination: Cancellable =
-               system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
-              ): Receive = {
+  private def handleAppendEntries(nomination: Cancellable): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
     case AppendEntries(term, _, prevLogIndex, _, _, _) if term < currentTerm || log.size < prevLogIndex =>
@@ -104,37 +97,43 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
       //5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
       if (leaderCommit > commitIndex) commitIndex = math.min(leaderCommit, log.size - 1)
+      become(follower())
+  }
+
+  private def handleVotes(nomination: Cancellable): Receive = {
     case RequestVote(term, candidateId, lastLogIndex, lastLogTerm) =>
       //1. Reply false if term < currentTerm (§5.1)
       //2. If votedFor is null or candidateId, and candidate’s log is
       //   at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
       nomination.cancel()
       sender() ! RequestVoteResult(currentTerm, term >= currentTerm && votedFor.forall(_ == candidateId))
-    case StandForElection =>
-      //election timeout elapsed, start election:
-      currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
-      self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
-      become(candidate())
+      become(follower())
   }
 
-  def candidate(): Receive = {
-    ???
-    /*    case NewLeader(id) =>
-      become(follower())
-    case AppendEntries(term, entries) if term >= this.term =>
-      handleEntries()
-      become(follower())
-    case ElectionEnd =>
-      become(follower())
-    case Vote =>
-      votes += 1
-      if(votes > nodes()) {
-        broadcast(NewLeader(id))
-        broadcast(AppendEntries(term, Vector.empty))
-        become(leader())
-      }*/
-  }
+  def follower(nomination: Cancellable =
+               system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)): Receive =
+    handleAppendEntries(nomination)
+      .orElse(handleVotes(nomination))
+      .orElse {
+      case StandForElection =>
+        //election timeout elapsed, start election:
+        currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
+        self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
+        broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
+        become(candidate())
+    }
+
+  def candidate(nomination: Cancellable =
+                system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
+               ): Receive =
+    follower(nomination).orElse {
+      case RequestVoteResult(term, true) if term == currentTerm =>
+        votes += 1
+        if (votes > nodes() / 2) {
+          broadcast(AppendEntries(currentTerm, id, log.size - 1, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
+          become(leader())
+        }
+    }
 
   def leader(): Receive = {
     ???
