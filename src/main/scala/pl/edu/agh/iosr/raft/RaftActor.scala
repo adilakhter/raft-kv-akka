@@ -1,6 +1,6 @@
 package pl.edu.agh.iosr.raft
 
-import akka.actor.{Actor, Cancellable}
+import akka.actor.{Actor, ActorRef, Cancellable}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -43,12 +43,12 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   /**
     * for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
     */
-  val nextIndex: ArrayBuffer[Int] = Stream.fill(nodes())(1).to[ArrayBuffer]
+  val nextIndex: ArrayBuffer[Int] = Stream.fill(nodes().size)(1).to[ArrayBuffer]
 
   /**
     * for each server, index of highest log entry known to be replicated on server (initialized to 0, increases monotonically)
     */
-  val matchIndex: ArrayBuffer[Int] = Stream.fill(nodes())(0).to[ArrayBuffer]
+  val matchIndex: ArrayBuffer[Int] = Stream.fill(nodes().size)(0).to[ArrayBuffer]
 
   var votes = 0
 
@@ -57,7 +57,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   override def receive: Receive = follower()
 
-  private def nodes(): Int = ???
+  private def nodes(): Vector[ActorRef] = ???
 
   private def broadcast(msg: Any): Unit = ???
 
@@ -129,14 +129,32 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
     follower(nomination).orElse {
       case RequestVoteResult(term, true) if term == currentTerm =>
         votes += 1
-        if (votes > nodes() / 2) {
+        if (votes > nodes().size / 2) {
           broadcast(AppendEntries(currentTerm, id, log.size - 1, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
           become(leader())
-        }
+        } else become(candidate())
     }
 
-  def leader(): Receive = {
-    ???
+  def leader(heartbeat: Cancellable =
+             system.scheduler.scheduleOnce(config.electionTimeout, self, Heartbeat)
+            ): Receive = {
+    case Heartbeat =>
+      nodes.iterator.zip(nextIndex.iterator).foreach {
+        case (ref, index) if log.size - 1 > index =>
+          val rpc = AppendEntries(
+            currentTerm,
+            id,
+            index,
+            log(index).term,
+            commitIndex,
+            log.view(index + 1, log.size).toVector
+          )
+          ref ! rpc
+          become(leader())
+      }
+    case AppendEntriesResult(term, success) =>
+
+    case _: Command =>
   }
 
 }
@@ -147,8 +165,14 @@ final case class Term(value: Int) extends AnyVal with Ordered[Term] {
   override def compare(that: Term) = value.compareTo(that.value)
 }
 
-trait Entry {
+sealed trait Command
+
+final case class SetValue(key: String, value: String) extends Command
+
+sealed trait Entry {
   def term: Term
+
+  def command: Command
 }
 
 object RaftActor {
@@ -192,5 +216,7 @@ object RaftActor {
   final case class RequestVoteResult(term: Term, voteGranted: Boolean)
 
   case object StandForElection
+
+  case object Heartbeat
 
 }
