@@ -131,6 +131,10 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
         votes += 1
         if (votes > nodes().size / 2) {
           broadcast(AppendEntries(currentTerm, id, log.size - 1, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
+          (0 to nodes().size).foreach { idx =>
+            nextIndex.update(idx, log.size + 1)
+            matchIndex.update(idx, 0)
+          }
           become(leader())
         } else become(candidate())
     }
@@ -153,9 +157,18 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
           become(leader())
       }
     case AppendEntriesResult(term, success) =>
-
-    case _: Command =>
+      val idx = nodes().indexOf(sender())
+      if (success) {
+        //todo update nextIndex and matchIndex
+      } else {
+        nextIndex(idx) = nextIndex(idx) - 1
+      }
+    case c: Command =>
+      log += Entry(currentTerm, c)
   }
+
+  //todo commitIndex updates
+  //todo apply to state machine?
 
 }
 
@@ -169,11 +182,7 @@ sealed trait Command
 
 final case class SetValue(key: String, value: String) extends Command
 
-sealed trait Entry {
-  def term: Term
-
-  def command: Command
-}
+final case class Entry(term: Term, command: Command)
 
 object RaftActor {
 
