@@ -3,8 +3,8 @@ package pl.edu.agh.iosr.raft
 import akka.actor.{Actor, ActorRef, Cancellable, Stash}
 import akka.event.Logging
 
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.{SeqView, mutable}
 
 class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
@@ -63,13 +63,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     case NodesInitialized(nodes) =>
       this.nodes = nodes
       unstashAll()
+      logger.info("Becoming a follower")
       become(follower())
     case msg => stash()
   }
 
   var nodes: Vector[ActorRef] = _
 
-  private def otherNodes() = nodes.view(0, id.value).iterator ++ nodes.view(id.value, nodes.size).iterator
+  lazy val otherNodes: SeqView[ActorRef, Seq[_]] = nodes.view(0, id.value) ++ nodes.view(id.value + 1, nodes.size)
 
   private def logIndex: Int = log.size - 1
 
@@ -148,7 +149,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       votes = 0
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
       self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      otherNodes().foreach(_ ! RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
+      otherNodes.foreach(_ ! RequestVote(currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
       logger.info("Becoming a candidate")
       become(candidate())
   }
@@ -172,8 +173,10 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
           votes += 1
           if (votes > nodes.size / 2) {
-            otherNodes().foreach(_ ! AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
-            (0 to nodes.size).foreach { idx =>
+            otherNodes.foreach(_ !
+              AppendEntries(currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm), commitIndex, Vector.empty)
+            ) //send initial empty AppendEntries RPCs
+            nodes.indices.foreach { idx =>
               nextIndex.update(idx, log.size)
               matchIndex.update(idx, 0)
             }
@@ -191,7 +194,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     handleAppendEntries(heartbeat) //leader can step down
       .orElse {
       case Heartbeat =>
-        otherNodes().zip(nextIndex.iterator).foreach {
+        otherNodes.iterator.zip(nextIndex.iterator).foreach {
           case (ref, index) if log.size - 1 > index =>
             val rpc = AppendEntries(
               currentTerm,
@@ -205,9 +208,9 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         }
         //If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:
         //set commitIndex = N (§5.3, §5.4).
-        commitIndex = (commitIndex until log.size).lastIndexWhere(idx =>
+        commitIndex = Option((commitIndex until log.size).lastIndexWhere(idx =>
           matchIndex.count(_ > idx) > matchIndex.size / 2 && log(idx).term == currentTerm
-        )
+        )).filter(_ != -1).getOrElse(0)
         logger.debug("Commit index: {}", commitIndex)
         become(leader())
       case AppendEntriesResult(term, logIndex, success) =>
