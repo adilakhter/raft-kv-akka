@@ -55,8 +55,6 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   private def nodes(): Vector[ActorRef] = ???
 
-  private def broadcast(msg: Any): Unit = ???
-
   private def logIndex: Int = log.size - 1
 
   private def updateTerm(term: Term): Unit = {
@@ -69,7 +67,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   private def handleAppendEntries(nomination: Cancellable): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-    case AppendEntries(term, _, prevLogIndex, _, _, _) if term < currentTerm || log.size < prevLogIndex =>
+    case AppendEntries(term, _, prevLogIndex, prevLogTerm, _, _)
+      if term < currentTerm || log.size <= prevLogIndex || log(prevLogIndex).term != prevLogTerm =>
       sender() ! AppendEntriesResult(currentTerm, logIndex, success = false)
     case AppendEntries(term, _, prevLogIndex, _, leaderCommit, entries) =>
       nomination.cancel()
@@ -132,7 +131,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       //election timeout elapsed, start election:
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
       self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      broadcast(RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
+      nodes.foreach(_ ! RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
       become(candidate())
   }
 
@@ -151,7 +150,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       case RequestVoteResult(term, true) if term == currentTerm =>
         votes += 1
         if (votes > nodes().size / 2) {
-          broadcast(AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
+          nodes.foreach(_ ! AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
           (0 to nodes().size).foreach { idx =>
             nextIndex.update(idx, log.size)
             matchIndex.update(idx, 0)
@@ -161,7 +160,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
     }
 
   def leader(heartbeat: Cancellable =
-             system.scheduler.scheduleOnce(config.electionTimeout, self, Heartbeat)
+             system.scheduler.scheduleOnce(config.broadcastTime, self, Heartbeat)
             ): Receive = {
     case Heartbeat =>
       nodes.iterator.zip(nextIndex.iterator).foreach {
@@ -175,8 +174,11 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
             log.view(index + 1, log.size).toVector
           )
           ref ! rpc
-          become(leader())
       }
+      //If there exists an N such that N > commitIndex, a majorit of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+      //set commitIndex = N (§5.3, §5.4).
+      commitIndex = (commitIndex until log.size).lastIndexWhere(idx => matchIndex.count(_ > idx) > matchIndex.size / 2)
+      become(leader())
     case AppendEntriesResult(term, logIndex, success) =>
       val idx = nodes().indexOf(sender())
       if (success) {
