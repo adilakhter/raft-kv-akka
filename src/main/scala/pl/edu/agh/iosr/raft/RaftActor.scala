@@ -106,27 +106,37 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       //2. If votedFor is null or candidateId, and candidate’s log is
       //   at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
       nomination.cancel()
-      sender() ! RequestVoteResult(currentTerm, term >= currentTerm && votedFor.forall(_ == candidateId))
+      val grantVote: Boolean =
+        term >= currentTerm &&
+          votedFor.forall(_ == candidateId) &&
+          lastLogIndex >= log.size - 1 &&
+          lastLogTerm >= log.last.term
+
+      sender() ! RequestVoteResult(currentTerm, grantVote)
       become(follower())
+  }
+
+  private def handleElection(nomination: Cancellable): Receive = {
+    case StandForElection =>
+      //election timeout elapsed, start election:
+      currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
+      self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
+      broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
+      become(candidate())
   }
 
   def follower(nomination: Cancellable =
                system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)): Receive =
     handleAppendEntries(nomination)
       .orElse(handleVotes(nomination))
-      .orElse {
-      case StandForElection =>
-        //election timeout elapsed, start election:
-        currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
-        self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-        broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
-        become(candidate())
-    }
+      .orElse(handleElection(nomination))
 
   def candidate(nomination: Cancellable =
                 system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
                ): Receive =
-    follower(nomination).orElse {
+    handleAppendEntries(nomination)
+      .orElse(handleElection(nomination))
+      .orElse {
       case RequestVoteResult(term, true) if term == currentTerm =>
         votes += 1
         if (votes > nodes().size / 2) {
