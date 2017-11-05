@@ -11,7 +11,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   private val logger = Logging(context.system, this)
 
   override def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
-    logger.debug(msg.toString)
+    logger.debug("<< {}", msg)
     receive.applyOrElse(msg, unhandled)
   }
 
@@ -63,7 +63,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     case NodesInitialized(nodes) =>
       this.nodes = nodes
       unstashAll()
-      logger.info("Becoming a follower")
+      logger.info("Becoming a follower (init)")
       become(follower())
     case _ => stash()
   }
@@ -106,7 +106,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
       //3. If an existing entry conflicts with a new one (same index but different terms),
       //   delete the existing entry and all that follow it (§5.3)
-      val existing = log.view(prevLogIndex + 1, log.size)
+      val existing = log.slice(prevLogIndex + 1, log.size)
       val (maybeConflicting, newEntries) = entries.splitAt(existing.size)
       val conflictIdx = Option(
         existing
@@ -145,7 +145,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
       if (grantVote) votedFor = Some(candidateId)
 
-      sender() ! RequestVoteResult(currentTerm, grantVote)
+      sender() ! RequestVoteResult(term, grantVote)
       become(follower())
   }
 
@@ -157,12 +157,12 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
       otherNodes.foreach(_ ! RequestVote(currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
       logger.info("Becoming a candidate")
-      become(candidate())
+      become(candidate(system.scheduler.scheduleOnce(config.randomElectionTimeout(), self, ElectionTimeout)))
   }
 
   private def scheduleElection(): Cancellable = {
     logger.debug("Scheduling election")
-    system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
+    system.scheduler.scheduleOnce(config.randomElectionTimeout(), self, StandForElection)
   }
 
   def follower(nomination: Cancellable = scheduleElection()): Receive =
@@ -170,13 +170,13 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       .orElse(handleVotes(nomination))
       .orElse(handleElection(nomination))
 
-  def candidate(nomination: Cancellable = scheduleElection()): Receive =
-    handleAppendEntries(nomination)
-      .orElse(handleElection(nomination))
+  def candidate(electionTimeout: Cancellable): Receive =
+    handleAppendEntries(electionTimeout)
       .orElse {
+        case ElectionTimeout =>
+          logger.debug("Becoming a follower (election timeout)")
+          become(follower())
         case RequestVoteResult(term, true) if term == currentTerm =>
-          nomination.cancel()
-
           votes += 1
           if (votes > nodes.size / 2) {
             otherNodes.foreach(_ !
@@ -188,7 +188,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
             }
             logger.info("Becoming a leader")
             become(leader())
-          } else become(candidate())
+          }
       }
 
   private def scheduleHeartbeat(): Cancellable = {
@@ -202,7 +202,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       case Heartbeat =>
         updateLastApplied()
 
-        otherNodes.iterator.zip(nextIndex.iterator).foreach {
+        nodes.iterator.zip(nextIndex.iterator).foreach {
+          case (ref, _) if ref == self =>
           case (ref, index) if log.size - 1 > index =>
             val rpc = AppendEntries(
               currentTerm,
@@ -210,20 +211,30 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
               index,
               log(index).term,
               commitIndex,
-              log.view(index + 1, log.size).toVector
+              log.slice(index + 1, log.size).toVector
+            )
+            ref ! rpc
+          case (ref, index) =>
+            //no new entries
+            val rpc = AppendEntries(
+              currentTerm,
+              id,
+              index - 1,
+              log(index - 1).term,
+              commitIndex,
+              Vector.empty
             )
             ref ! rpc
         }
-        commitIndex = (commitIndex until log.size).filter { idx =>
-          val replicated = matchIndex.count(_ >= idx)
-          val term = log(idx).term
-          val replicatedEnough = replicated > nodes.size / 2
-          val termEqual = term == currentTerm
+        commitIndex = (commitIndex + 1 until log.size).filter { idx =>
+          val replicatedEnough = matchIndex.count(_ >= idx) > nodes.size / 2
+          val termEqual = log(idx).term == currentTerm
           replicatedEnough && termEqual
-        }.last
+        }.lastOption.getOrElse(commitIndex)
         logger.debug("Commit index: {}", commitIndex)
         become(leader())
       case AppendEntriesResult(term, logIndex, success) =>
+        heartbeat.cancel()
         val idx = nodes.indexOf(sender())
         if (success) {
           nextIndex(idx) = logIndex + 1
@@ -297,8 +308,10 @@ object RaftActor {
 
   final case class NodesInitialized(nodes: Vector[ActorRef])
 
-  case object StandForElection
+  private case object StandForElection
 
-  case object Heartbeat
+  private case object ElectionTimeout
+
+  private case object Heartbeat
 
 }

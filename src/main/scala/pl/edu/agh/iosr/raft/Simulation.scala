@@ -7,8 +7,8 @@ object Simulation extends App {
 
   import scala.concurrent.duration._
 
-  val Nodes = 1
-  val Config = RaftConfig(1.second, 11.seconds)
+  val Nodes = 2
+  val Config = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
 
   val system = ActorSystem("raft-kv-akka")
 
@@ -16,11 +16,11 @@ object Simulation extends App {
 
   refs.foreach(_ ! NodesInitialized(refs))
 
-  Thread.sleep(20000)
+  /*  Thread.sleep(20000)
 
-  refs.foreach(_ ! SetValue("lol", "abc"))
+    refs.foreach(_ ! SetValue("lol", "abc"))
 
-  Thread.sleep(5000)
+    Thread.sleep(5000)
 
-  refs.foreach(_ ! SetValue("lol2", "abc"))
+    refs.foreach(_ ! SetValue("lol2", "abc"))*/
 }
