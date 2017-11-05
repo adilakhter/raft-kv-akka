@@ -30,7 +30,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     * log entries; each entry contains command for state machine,
     * and term when entry was received by leader (first index is 1)
     */
-  val log: ArrayBuffer[Entry] = mutable.ArrayBuffer.empty[Entry]
+  val log: ArrayBuffer[Entry] = mutable.ArrayBuffer(Entry(Term(1), Init))
 
   //volatile state on all
   /**
@@ -65,7 +65,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       unstashAll()
       logger.info("Becoming a follower")
       become(follower())
-    case msg => stash()
+    case _ => stash()
   }
 
   var nodes: Vector[ActorRef] = _
@@ -81,6 +81,17 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     }
   }
 
+  /**
+    * If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
+    */
+  private def updateLastApplied(): Unit = {
+    if (commitIndex > lastApplied) {
+      //todo apply to state machine
+      lastApplied = commitIndex
+      logger.debug("Last applied: {}", lastApplied)
+    }
+  }
+
   private def handleAppendEntries(nomination: Cancellable): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
@@ -91,12 +102,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       nomination.cancel()
 
       updateTerm(term)
-
-      //If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
-      if (commitIndex > lastApplied) {
-        //todo apply to state machine
-        lastApplied = commitIndex
-      }
+      updateLastApplied()
 
       //3. If an existing entry conflicts with a new one (same index but different terms),
       //   delete the existing entry and all that follow it (§5.3)
@@ -194,6 +200,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     handleAppendEntries(heartbeat) //leader can step down
       .orElse {
       case Heartbeat =>
+        updateLastApplied()
+
         otherNodes.iterator.zip(nextIndex.iterator).foreach {
           case (ref, index) if log.size - 1 > index =>
             val rpc = AppendEntries(
@@ -206,11 +214,13 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
             )
             ref ! rpc
         }
-        //If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:
-        //set commitIndex = N (§5.3, §5.4).
-        commitIndex = Option((commitIndex until log.size).lastIndexWhere(idx =>
-          matchIndex.count(_ > idx) > matchIndex.size / 2 && log(idx).term == currentTerm
-        )).filter(_ != -1).getOrElse(0)
+        commitIndex = (commitIndex until log.size).filter { idx =>
+          val replicated = matchIndex.count(_ >= idx)
+          val term = log(idx).term
+          val replicatedEnough = replicated > nodes.size / 2
+          val termEqual = term == currentTerm
+          replicatedEnough && termEqual
+        }.last
         logger.debug("Commit index: {}", commitIndex)
         become(leader())
       case AppendEntriesResult(term, logIndex, success) =>
@@ -224,6 +234,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         become(leader())
       case c: Command =>
         log += Entry(currentTerm, c)
+        matchIndex(id.value) = logIndex
         become(leader())
     }
 }
@@ -238,7 +249,10 @@ sealed trait Command
 
 final case class SetValue(key: String, value: String) extends Command
 
+case object Init extends Command
+
 final case class Entry(term: Term, command: Command)
+
 
 object RaftActor {
 

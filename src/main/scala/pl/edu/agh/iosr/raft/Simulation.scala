@@ -15,4 +15,12 @@ object Simulation extends App {
   val refs: Vector[ActorRef] = (0 until Nodes).map(idx => system.actorOf(Props(new RaftActor(Id(idx), Config))))(collection.breakOut)
 
   refs.foreach(_ ! NodesInitialized(refs))
+
+  Thread.sleep(20000)
+
+  refs.foreach(_ ! SetValue("lol", "abc"))
+
+  Thread.sleep(5000)
+
+  refs.foreach(_ ! SetValue("lol2", "abc"))
 }
