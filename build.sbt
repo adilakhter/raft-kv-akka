@@ -4,6 +4,7 @@ import sbt.protocol.testing.TestResult.{Failed, Passed}
 val Versions = new {
   val Akka = "2.5.6"
   val ScalaTest = "3.0.4"
+  val Logback = "1.2.3"
 }
 
 name := "raft-kv-akka"
@@ -14,6 +15,8 @@ scalaVersion := "2.12.4"
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-remote" % Versions.Akka,
   "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
+  "com.typesafe.akka" %% "akka-slf4j" % Versions.Akka,
+  "ch.qos.logback" % "logback-classic" % Versions.Logback,
   "org.scalatest" %% "scalatest" % Versions.ScalaTest
 )
 
