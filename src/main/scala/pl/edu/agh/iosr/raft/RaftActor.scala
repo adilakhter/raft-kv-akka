@@ -1,11 +1,19 @@
 package pl.edu.agh.iosr.raft
 
 import akka.actor.{Actor, ActorRef, Cancellable}
+import akka.event.Logging
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class RaftActor(id: Id, config: RaftConfig) extends Actor {
+
+  private val logger = Logging(context.system, this)
+
+  override def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
+    logger.debug(msg.toString)
+    receive.applyOrElse(msg, unhandled)
+  }
 
   //persistent state on all
   /**
@@ -55,6 +63,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   private def nodes(): Vector[ActorRef] = ???
 
+  private def otherNodes() = nodes().view(0, id.value).iterator ++ nodes().view(id.value, nodes().size).iterator
+
   private def logIndex: Int = log.size - 1
 
   private def updateTerm(term: Term): Unit = {
@@ -77,8 +87,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
       //If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
       if (commitIndex > lastApplied) {
-        lastApplied = commitIndex
         //todo apply to state machine
+        lastApplied = commitIndex
       }
 
       //3. If an existing entry conflicts with a new one (same index but different terms),
@@ -129,79 +139,91 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   private def handleElection(nomination: Cancellable): Receive = {
     case StandForElection =>
       //election timeout elapsed, start election:
+      votes = 0
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
       self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      nodes.foreach(_ ! RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
+      otherNodes().foreach(_ ! RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
+      logger.info("Becoming a candidate")
       become(candidate())
   }
 
-  def follower(nomination: Cancellable =
-               system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)): Receive =
+  private def scheduleElection(): Cancellable = {
+    logger.debug("Scheduling election")
+    system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
+  }
+
+  def follower(nomination: Cancellable = scheduleElection()): Receive =
     handleAppendEntries(nomination)
       .orElse(handleVotes(nomination))
       .orElse(handleElection(nomination))
 
-  def candidate(nomination: Cancellable =
-                system.scheduler.scheduleOnce(config.electionTimeout, self, StandForElection)
-               ): Receive =
+  def candidate(nomination: Cancellable = scheduleElection()): Receive =
     handleAppendEntries(nomination)
       .orElse(handleElection(nomination))
       .orElse {
-      case RequestVoteResult(term, true) if term == currentTerm =>
-        votes += 1
-        if (votes > nodes().size / 2) {
-          nodes.foreach(_ ! AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
-          (0 to nodes().size).foreach { idx =>
-            nextIndex.update(idx, log.size)
-            matchIndex.update(idx, 0)
-          }
-          become(leader())
-        } else become(candidate())
-    }
+        case RequestVoteResult(term, true) if term == currentTerm =>
+          nomination.cancel()
 
-  def leader(heartbeat: Cancellable =
-             system.scheduler.scheduleOnce(config.broadcastTime, self, Heartbeat)
-            ): Receive = {
-    case Heartbeat =>
-      nodes.iterator.zip(nextIndex.iterator).foreach {
-        case (ref, index) if log.size - 1 > index =>
-          val rpc = AppendEntries(
-            currentTerm,
-            id,
-            index,
-            log(index).term,
-            commitIndex,
-            log.view(index + 1, log.size).toVector
-          )
-          ref ! rpc
+          votes += 1
+          if (votes > nodes().size / 2) {
+            otherNodes().foreach(_ ! AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
+            (0 to nodes().size).foreach { idx =>
+              nextIndex.update(idx, log.size)
+              matchIndex.update(idx, 0)
+            }
+            logger.info("Becoming a leader")
+            become(leader())
+          } else become(candidate())
       }
-      //If there exists an N such that N > commitIndex, a majorit of matchIndex[i] ≥ N, and log[N].term == currentTerm:
-      //set commitIndex = N (§5.3, §5.4).
-      commitIndex = (commitIndex until log.size).lastIndexWhere(idx => matchIndex.count(_ > idx) > matchIndex.size / 2)
-      become(leader())
-    case AppendEntriesResult(term, logIndex, success) =>
-      val idx = nodes().indexOf(sender())
-      if (success) {
-        nextIndex(idx) = logIndex + 1
-        //todo update matchIndex
-      } else {
-        nextIndex(idx) = nextIndex(idx) - 1
-      }
-      become(leader())
-    case c: Command =>
-      log += Entry(currentTerm, c)
-      become(leader())
+
+  private def scheduleHeartbeat(): Cancellable = {
+    logger.debug("Scheduling heartbeat")
+    system.scheduler.scheduleOnce(config.broadcastTime, self, Heartbeat)
   }
+
+  def leader(heartbeat: Cancellable = scheduleHeartbeat()): Receive =
+    handleAppendEntries(heartbeat) //leader can step down
+      .orElse {
+      case Heartbeat =>
+        otherNodes().zip(nextIndex.iterator).foreach {
+          case (ref, index) if log.size - 1 > index =>
+            val rpc = AppendEntries(
+              currentTerm,
+              id,
+              index,
+              log(index).term,
+              commitIndex,
+              log.view(index + 1, log.size).toVector
+            )
+            ref ! rpc
+        }
+        //If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+        //set commitIndex = N (§5.3, §5.4).
+        commitIndex = (commitIndex until log.size).lastIndexWhere(idx => matchIndex.count(_ > idx) > matchIndex.size / 2)
+        logger.debug("Commit index: {}", commitIndex)
+        become(leader())
+      case AppendEntriesResult(term, logIndex, success) =>
+        val idx = nodes().indexOf(sender())
+        if (success) {
+          nextIndex(idx) = logIndex + 1
+          //todo update matchIndex
+        } else {
+          nextIndex(idx) = nextIndex(idx) - 1
+        }
+        become(leader())
+      case c: Command =>
+        log += Entry(currentTerm, c)
+        become(leader())
+    }
 
   //todo commitIndex updates
   //todo apply to state machine?
-
 }
 
-final case class Id(value: String) extends AnyVal
+final case class Id(value: Int) extends AnyVal
 
 final case class Term(value: Int) extends AnyVal with Ordered[Term] {
-  override def compare(that: Term) = value.compareTo(that.value)
+  override def compare(that: Term): Int = value.compareTo(that.value)
 }
 
 sealed trait Command
