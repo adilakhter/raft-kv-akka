@@ -19,4 +19,9 @@ object Simulation extends App {
   Thread.sleep(20.seconds.toMillis)
 
   refs.foreach(_ ! SetValue("lol", "abc"))
+
+  Thread.sleep(20.seconds.toMillis)
+
+  refs.foreach(_ ! SetValue("lol2", "abc"))
+  refs.foreach(_ ! SetValue("lol3", "abc"))
 }
