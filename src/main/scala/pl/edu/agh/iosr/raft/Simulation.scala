@@ -16,11 +16,7 @@ object Simulation extends App {
 
   refs.foreach(_ ! NodesInitialized(refs))
 
-  /*  Thread.sleep(20000)
+  Thread.sleep(20.seconds.toMillis)
 
-    refs.foreach(_ ! SetValue("lol", "abc"))
-
-    Thread.sleep(5000)
-
-    refs.foreach(_ ! SetValue("lol2", "abc"))*/
+  refs.foreach(_ ! SetValue("lol", "abc"))
 }

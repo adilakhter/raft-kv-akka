@@ -204,14 +204,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
         nodes.iterator.zip(nextIndex.iterator).foreach {
           case (ref, _) if ref == self =>
-          case (ref, index) if log.size - 1 > index =>
+          case (ref, index) if log.size > index =>
             val rpc = AppendEntries(
               currentTerm,
               id,
-              index,
-              log(index).term,
+              index - 1,
+              log(index - 1).term,
               commitIndex,
-              log.slice(index + 1, log.size).toVector
+              log.slice(index, log.size).toVector
             )
             ref ! rpc
           case (ref, index) =>
@@ -244,6 +244,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         }
         become(leader())
       case c: Command =>
+        heartbeat.cancel()
         log += Entry(currentTerm, c)
         matchIndex(id.value) = logIndex
         become(leader())
