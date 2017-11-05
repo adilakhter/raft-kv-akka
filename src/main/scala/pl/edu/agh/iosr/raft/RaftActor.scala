@@ -6,10 +6,6 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class RaftActor(id: Id, config: RaftConfig) extends Actor {
-  /*  import DistributedPubSubMediator.{ Subscribe, SubscribeAck }
-    val mediator = DistributedPubSub(context.system).mediator
-    // subscribe to the topic named "content"
-    mediator ! Subscribe("content", self)*/
 
   //persistent state on all
   /**
@@ -61,14 +57,24 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
   private def broadcast(msg: Any): Unit = ???
 
+  private def logIndex: Int = log.size - 1
+
+  private def updateTerm(term: Term): Unit = {
+    if (term > currentTerm) {
+      votedFor = None
+      currentTerm = term
+    }
+  }
+
   private def handleAppendEntries(nomination: Cancellable): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
     case AppendEntries(term, _, prevLogIndex, _, _, _) if term < currentTerm || log.size < prevLogIndex =>
-      sender() ! AppendEntriesResult(currentTerm, success = false)
+      sender() ! AppendEntriesResult(currentTerm, logIndex, success = false)
     case AppendEntries(term, _, prevLogIndex, _, leaderCommit, entries) =>
-      currentTerm = term // >= here
       nomination.cancel()
+
+      updateTerm(term)
 
       //If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied] to state machine (§5.3)
       if (commitIndex > lastApplied) {
@@ -97,6 +103,9 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
 
       //5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
       if (leaderCommit > commitIndex) commitIndex = math.min(leaderCommit, log.size - 1)
+
+      sender() ! AppendEntriesResult(currentTerm, logIndex, success = true)
+
       become(follower())
   }
 
@@ -109,8 +118,10 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       val grantVote: Boolean =
         term >= currentTerm &&
           votedFor.forall(_ == candidateId) &&
-          lastLogIndex >= log.size - 1 &&
+          lastLogIndex >= logIndex &&
           lastLogTerm >= log.last.term
+
+      if (grantVote) votedFor = Some(candidateId)
 
       sender() ! RequestVoteResult(currentTerm, grantVote)
       become(follower())
@@ -119,9 +130,9 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
   private def handleElection(nomination: Cancellable): Receive = {
     case StandForElection =>
       //election timeout elapsed, start election:
-      currentTerm = currentTerm.copy(currentTerm.value + 1) //increment currentTerm
+      updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
       self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      broadcast(RequestVote(currentTerm, id, log.size - 1, log.last.term)) //send RequestVote RPCs to all other servers
+      broadcast(RequestVote(currentTerm, id, logIndex, log.last.term)) //send RequestVote RPCs to all other servers
       become(candidate())
   }
 
@@ -140,9 +151,9 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
       case RequestVoteResult(term, true) if term == currentTerm =>
         votes += 1
         if (votes > nodes().size / 2) {
-          broadcast(AppendEntries(currentTerm, id, log.size - 1, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
+          broadcast(AppendEntries(currentTerm, id, logIndex, log.last.term, commitIndex, Vector.empty)) //send initial empty AppendEntries RPCs
           (0 to nodes().size).foreach { idx =>
-            nextIndex.update(idx, log.size + 1)
+            nextIndex.update(idx, log.size)
             matchIndex.update(idx, 0)
           }
           become(leader())
@@ -166,15 +177,18 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor {
           ref ! rpc
           become(leader())
       }
-    case AppendEntriesResult(term, success) =>
+    case AppendEntriesResult(term, logIndex, success) =>
       val idx = nodes().indexOf(sender())
       if (success) {
-        //todo update nextIndex and matchIndex
+        nextIndex(idx) = logIndex + 1
+        //todo update matchIndex
       } else {
         nextIndex(idx) = nextIndex(idx) - 1
       }
+      become(leader())
     case c: Command =>
       log += Entry(currentTerm, c)
+      become(leader())
   }
 
   //todo commitIndex updates
@@ -211,10 +225,11 @@ object RaftActor {
   /**
     * Result of AppendEntriesRPC
     *
-    * @param term    currentTerm, for leader to update itself
-    * @param success true if follower contained entry matching prevLogIndex and prevLogTerm
+    * @param term     currentTerm, for leader to update itself
+    * @param logIndex log index after update
+    * @param success  true if follower contained entry matching prevLogIndex and prevLogTerm
     */
-  final case class AppendEntriesResult(term: Term, success: Boolean)
+  final case class AppendEntriesResult(term: Term, logIndex: Int, success: Boolean)
 
   /**
     * Invoked by candidates to gather votes (§5.2).
