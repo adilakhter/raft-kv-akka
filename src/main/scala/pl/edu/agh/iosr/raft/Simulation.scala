@@ -7,7 +7,7 @@ object Simulation extends App {
 
   import scala.concurrent.duration._
 
-  val Nodes = 2
+  val Nodes = 5
   val Config = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
 
   val system = ActorSystem("raft-kv-akka")
