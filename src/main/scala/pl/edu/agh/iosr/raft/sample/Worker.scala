@@ -1,4 +1,4 @@
-package pl.edu.agh.iosr.raft
+package pl.edu.agh.iosr.raft.sample
 
 import akka.actor.Actor
 
@@ -7,7 +7,7 @@ class Worker extends Actor {
 
   def receive = {
     case Work =>
-      println(s"I received Work Message and My ActorRef: ${self}")
+      println(s"I received Work Message and My ActorRef: $self")
       sender() ! Done
   }
 }

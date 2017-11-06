@@ -1,14 +1,22 @@
-package pl.edu.agh.iosr.raft
+package pl.edu.agh.iosr.raft.sample
 
 import akka.actor.Props
-import akka.remote.testkit.MultiNodeSpec
+import akka.remote.testconductor.RoleName
+import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
-import pl.edu.agh.iosr.raft.MultiNodeSampleConfig._
+import pl.edu.agh.iosr.raft.BasicMultiNodeSpec
 
+
+object MultiNodeSampleConfig extends MultiNodeConfig {
+  val node1: RoleName = role("node1")
+  val node2: RoleName = role("node2")
+}
 
 class MultiNodeSample extends MultiNodeSpec(MultiNodeSampleConfig)
                       with BasicMultiNodeSpec
                       with ImplicitSender {
+
+  import MultiNodeSampleConfig._
 
   // initial Participants
 
