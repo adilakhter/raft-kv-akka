@@ -2,11 +2,15 @@ package pl.edu.agh.iosr.raft
 
 import akka.actor.{Actor, ActorRef, Cancellable, Stash}
 import akka.event.Logging
+import pl.edu.agh.iosr.raft.commands.{Command, Init}
+import pl.edu.agh.iosr.raft.model.{Id, Term}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.{SeqView, mutable}
 
 class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
+
+  import RaftActor._
 
   private val logger = Logging(context.system, this)
 
@@ -251,21 +255,6 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     }
 }
 
-final case class Id(value: Int) extends AnyVal
-
-final case class Term(value: Int) extends AnyVal with Ordered[Term] {
-  override def compare(that: Term): Int = value.compareTo(that.value)
-}
-
-sealed trait Command
-
-final case class SetValue(key: String, value: String) extends Command
-
-case object Init extends Command
-
-final case class Entry(term: Term, command: Command)
-
-
 object RaftActor {
 
   /**
@@ -309,10 +298,23 @@ object RaftActor {
 
   final case class NodesInitialized(nodes: Vector[ActorRef])
 
+  /**
+    * Message scheduled by a follower to himself to stand for a new election.
+    */
   private case object StandForElection
 
+  /**
+    * Message scheduled by a candidate to himself to timeout an election.
+    */
   private case object ElectionTimeout
 
+  /**
+    * Message scheduled by a leader to himself to periodically sent a heartbeat to other actors.
+    */
   private case object Heartbeat
 
+  /**
+    * A log entry representing a command and the term of its reception.
+    */
+  final case class Entry(term: Term, command: Command)
 }
