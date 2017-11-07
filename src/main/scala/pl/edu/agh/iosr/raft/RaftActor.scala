@@ -98,7 +98,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   }
 
   private def handleStateReport(state: ActorState): Receive = {
-    case GetReport => ActorStateReport(id, state, currentTerm, commitIndex, lastApplied)
+    case GetReport => sender() ! ActorStateReport(id, state, currentTerm, commitIndex, lastApplied)
   }
 
   private def handleAppendEntries(nomination: Cancellable): Receive = {
