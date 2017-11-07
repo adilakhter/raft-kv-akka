@@ -2,8 +2,8 @@ package pl.edu.agh.iosr.raft
 
 import akka.actor.{Actor, ActorRef, Cancellable, Stash}
 import akka.event.Logging
-import pl.edu.agh.iosr.raft.commands.{Command, Init}
-import pl.edu.agh.iosr.raft.model.{Id, Term}
+import pl.edu.agh.iosr.raft.command.{Command, Init}
+import pl.edu.agh.iosr.raft.model._
 import pl.edu.agh.iosr.raft.status._
 
 import scala.collection.mutable.ArrayBuffer
@@ -49,6 +49,11 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     */
   var lastApplied: Int = 0
 
+  /**
+    * current state machine state
+    */
+  var state: mutable.Map[String, String] = mutable.HashMap.empty
+
   //volatile state on leaders
   /**
     * for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
@@ -91,14 +96,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     */
   private def updateLastApplied(): Unit = {
     if (commitIndex > lastApplied) {
-      //todo apply to state machine
+      log.view(lastApplied + 1, commitIndex + 1).foreach(_.command(state))
       lastApplied = commitIndex
       logger.debug("Last applied: {}", lastApplied)
     }
   }
 
   private def handleStateReport(state: ActorState): Receive = {
-    case GetReport => sender() ! ActorStateReport(id, state, currentTerm, commitIndex, lastApplied)
+    case GetReport => sender() ! ActorStateReport(id, state, currentTerm, commitIndex, lastApplied, this.state.toMap)
   }
 
   private def handleAppendEntries(nomination: Cancellable): Receive = {
@@ -328,10 +333,5 @@ object RaftActor {
     * Message scheduled by a leader to himself to periodically sent a heartbeat to other actors.
     */
   private case object Heartbeat
-
-  /**
-    * A log entry representing a command and the term of its reception.
-    */
-  final case class Entry(term: Term, command: Command)
 
 }

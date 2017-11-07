@@ -2,7 +2,7 @@ package pl.edu.agh.iosr.raft
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import pl.edu.agh.iosr.raft.RaftActor.NodesInitialized
-import pl.edu.agh.iosr.raft.commands.SetValue
+import pl.edu.agh.iosr.raft.command.SetValue
 import pl.edu.agh.iosr.raft.model.Id
 
 object Simulation extends App {
