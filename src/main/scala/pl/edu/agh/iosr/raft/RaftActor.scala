@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, Cancellable, Stash}
 import akka.event.Logging
 import pl.edu.agh.iosr.raft.commands.{Command, Init}
 import pl.edu.agh.iosr.raft.model.{Id, Term}
+import pl.edu.agh.iosr.raft.status._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.{SeqView, mutable}
@@ -11,6 +12,7 @@ import scala.collection.{SeqView, mutable}
 class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
   import RaftActor._
+  import context._
 
   private val logger = Logging(context.system, this)
 
@@ -60,23 +62,22 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
   var votes = 0
 
-  import RaftActor._
-  import context._
-
-  override def receive: Receive = {
-    case NodesInitialized(nodes) =>
-      this.nodes = nodes
-      unstashAll()
-      logger.info("Becoming a follower (init)")
-      become(follower())
-    case _ => stash()
-  }
-
   var nodes: Vector[ActorRef] = _
 
   lazy val otherNodes: SeqView[ActorRef, Seq[_]] = nodes.view(0, id.value) ++ nodes.view(id.value + 1, nodes.size)
 
   private def logIndex: Int = log.size - 1
+
+  override def receive: Receive =
+    handleStateReport(Uninitialized)
+      .orElse {
+        case NodesInitialized(nodes) =>
+          this.nodes = nodes
+          unstashAll()
+          logger.info("Becoming a follower (init)")
+          become(follower())
+        case _ => stash()
+      }
 
   private def updateTerm(term: Term): Unit = {
     if (term > currentTerm) {
@@ -94,6 +95,10 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       lastApplied = commitIndex
       logger.debug("Last applied: {}", lastApplied)
     }
+  }
+
+  private def handleStateReport(state: ActorState): Receive = {
+    case GetReport => ActorStateReport(id, state, currentTerm, commitIndex, lastApplied)
   }
 
   private def handleAppendEntries(nomination: Cancellable): Receive = {
@@ -170,12 +175,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   }
 
   def follower(nomination: Cancellable = scheduleElection()): Receive =
-    handleAppendEntries(nomination)
+    handleStateReport(Follower)
+      .orElse(handleAppendEntries(nomination))
       .orElse(handleVotes(nomination))
       .orElse(handleElection(nomination))
 
   def candidate(electionTimeout: Cancellable): Receive =
-    handleAppendEntries(electionTimeout)
+    handleStateReport(Candidate)
+      .orElse(handleAppendEntries(electionTimeout))
       .orElse {
         case ElectionTimeout =>
           logger.debug("Becoming a follower (election timeout)")
@@ -201,7 +208,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   }
 
   def leader(heartbeat: Cancellable = scheduleHeartbeat()): Receive =
-    handleAppendEntries(heartbeat) //leader can step down
+    handleStateReport(Leader)
+      .orElse(handleAppendEntries(heartbeat)) //leader can step down
       .orElse {
       case Heartbeat =>
         updateLastApplied()
@@ -296,7 +304,15 @@ object RaftActor {
     */
   final case class RequestVoteResult(term: Term, voteGranted: Boolean)
 
+  /**
+    * Starts the algorithm after the nodes are initialized.
+    */
   final case class NodesInitialized(nodes: Vector[ActorRef])
+
+  /**
+    * Requests participant's [[ActorStateReport]].
+    */
+  final case object GetReport
 
   /**
     * Message scheduled by a follower to himself to stand for a new election.
@@ -317,4 +333,5 @@ object RaftActor {
     * A log entry representing a command and the term of its reception.
     */
   final case class Entry(term: Term, command: Command)
+
 }

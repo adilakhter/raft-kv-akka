@@ -1,4 +1,6 @@
-package pl.edu.agh.iosr.raft.model
+package pl.edu.agh.iosr.raft.status
+
+import pl.edu.agh.iosr.raft.model.{Id, Term}
 
 /**
   * Actor state report.
