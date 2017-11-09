@@ -69,9 +69,9 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
         receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport].state shouldBe Leader
       }(PatienceConfig(maxElectionTimeout, config.broadcastTime), implicitly)
 
-      val key = "k1"
-      val value = "v1"
-      actor ! SetValue(id, key, value)
+      val key1 = "k1"
+      val value1 = "v1"
+      actor ! SetValue(id, key1, value1)
 
       eventually {
         actor ! GetReport(id)
@@ -84,10 +84,27 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       eventually {
         actor ! GetReport(id)
         val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
-        report.values shouldBe Map(key -> value)
+        report.values shouldBe Map(key1 -> value1)
         report.commitIndex shouldBe 1
         report.lastApplied shouldBe 1
       }(PatienceConfig(config.broadcastTime * 3, config.broadcastTime), implicitly)
+
+      val key2 = "k2"
+      val value2 = "v2"
+      val key3 = "k3"
+      val value3 = "v3"
+      actor ! SetValue(id, key2, value2)
+      actor ! SetValue(id, key3, value3)
+
+      eventually {
+        actor ! GetReport(id)
+        val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
+        report.values shouldBe Map(key1 -> value1, key2 -> value2, key3 -> value3)
+        report.commitIndex shouldBe 3
+        report.lastApplied shouldBe 3
+      }(PatienceConfig(config.broadcastTime * 3, config.broadcastTime), implicitly)
     }
+
+
   }
 }
