@@ -1,6 +1,6 @@
 package pl.edu.agh.iosr.raft.status
 
-sealed trait ActorState
+sealed trait ActorState extends Product
 
 case object Uninitialized extends ActorState
 

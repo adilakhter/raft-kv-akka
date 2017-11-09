@@ -4,6 +4,7 @@ import sbt.protocol.testing.TestResult.{Failed, Passed}
 val Versions = new {
   val Akka = "2.5.6"
   val AkkaHttp = "10.0.10"
+  val PlayJson = "2.6.6"
   val ScalaTest = "3.0.4"
   val Logback = "1.2.3"
 }
@@ -18,6 +19,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
   "com.typesafe.akka" %% "akka-slf4j" % Versions.Akka,
   "com.typesafe.akka" %% "akka-http" % Versions.AkkaHttp,
+  "com.typesafe.play" %% "play-json" % Versions.PlayJson,
   "ch.qos.logback" % "logback-classic" % Versions.Logback,
   "org.scalatest" %% "scalatest" % Versions.ScalaTest
 )

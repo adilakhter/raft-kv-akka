@@ -7,8 +7,9 @@ import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import pl.edu.agh.iosr.raft.RaftActor.{NodesInitialized, SendReport, StatusRef}
 import pl.edu.agh.iosr.raft.command.SetValue
-import pl.edu.agh.iosr.raft.model.Id
-import pl.edu.agh.iosr.raft.status.ActorStateReport
+import pl.edu.agh.iosr.raft.model.{Id, Term}
+import pl.edu.agh.iosr.raft.status._
+import play.api.libs.json._
 
 import scala.concurrent.Future
 
@@ -21,12 +22,16 @@ object Simulation extends App {
 
   implicit private val system: ActorSystem = ActorSystem("raft-kv-akka")
   implicit private val materializer: ActorMaterializer = ActorMaterializer()
+  implicit private val termFormat: Writes[Term] = term => JsNumber(BigDecimal(term.value))
+  implicit private val idFormat: Writes[Id] = id => JsString(id.value.toString)
+  implicit private val stateFormat: Writes[ActorState] = state => JsString(state.productPrefix)
+  implicit private val reportFormat: Writes[ActorStateReport] = Json.writes[ActorStateReport]
 
   val refs: Vector[ActorRef] = (0 until Nodes).map(idx => system.actorOf(Props(new RaftActor(Id(idx), Config))))(collection.breakOut)
 
   val websocketSource: Source[Message, ActorRef] =
     Source.actorRef[ActorStateReport](1024, OverflowStrategy.dropHead)
-      .map(rep => TextMessage(rep.toString))
+      .map(rep => TextMessage(Json.toJson(rep).toString()))
       .mapMaterializedValue { ref =>
         refs.foreach(_ ! StatusRef(ref))
         ref
