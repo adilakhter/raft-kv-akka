@@ -1,7 +1,7 @@
 package pl.edu.agh.iosr.raft
 
 import akka.actor.{ActorSystem, Props}
-import akka.testkit.{ImplicitSender, TestKit}
+import akka.testkit._
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import pl.edu.agh.iosr.raft.RaftActor.{GetReport, NodesInitialized}
@@ -20,7 +20,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
   import scala.concurrent.duration._
 
   val maxElectionTimeout: FiniteDuration = 4.seconds
-  val config = RaftConfig(1.second, 2.seconds, maxElectionTimeout)
+  val config = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
 
   "An RaftActor" must {
     "start uninitialized" in {
@@ -50,7 +50,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
 
       actor ! NodesInitialized(Vector(actor))
 
-      Thread.sleep(maxElectionTimeout.toMillis)
+      Thread.sleep(2 * maxElectionTimeout.toMillis)
 
       actor ! GetReport
 
