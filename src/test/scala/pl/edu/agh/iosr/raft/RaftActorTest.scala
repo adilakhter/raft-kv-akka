@@ -20,7 +20,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
   import scala.concurrent.duration._
 
   val maxElectionTimeout: FiniteDuration = 4.seconds
-  implicit val config = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
+  implicit val config: RaftConfig = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
 
   "An RaftActor" must {
     "start uninitialized" in {
@@ -37,7 +37,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
       actor ! GetReport(id)
 
       val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
@@ -48,7 +48,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
 
       Thread.sleep(2 * maxElectionTimeout.toMillis)
 
@@ -62,7 +62,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
 
       eventually {
         actor ! GetReport(id)

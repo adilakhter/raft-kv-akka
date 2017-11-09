@@ -83,14 +83,19 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
 
   lazy val otherNodes: SeqView[Id, Seq[_]] = nodes.view(0, id.value) ++ nodes.view(id.value + 1, nodes.size)
 
+  var refsOpt: Option[Vector[ActorRef]] = None
+
+  def target(id: Id): ActorRef = refsOpt.map(_.apply(id.value)).getOrElse(Simulation.RaftRegionRef)
+
   private def logIndex: Int = log.size - 1
 
   override def receive: Receive =
     handleStateReport(Uninitialized)
       .orElse {
-        case NodesInitialized(id, nodes) =>
+        case NodesInitialized(id, nodes, refsOpt) =>
           this.id = id
           this.nodes = nodes
+          this.refsOpt = refsOpt
           unstashAll()
           logger.info("Becoming a follower (init)")
           become(follower())
@@ -154,7 +159,9 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
       ).filter(_ != -1)
       conflictIdx.foreach { idx =>
         log.reduceToSize(prevLogIndex + idx)
-        log ++= maybeConflicting.drop(idx)
+        val added = maybeConflicting.drop(idx)
+        logger.error(added.toString())
+        log ++= added
       }
 
       //4. Append any new entries not already in the log
@@ -192,7 +199,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
       votes = 0
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
       self ! RequestVoteResult(id, currentTerm, voteGranted = true) //vote for self
-      otherNodes.foreach(Simulation.RaftRegionRef ! RequestVote(_, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
+      otherNodes.foreach(nodeId => target(nodeId) ! RequestVote(nodeId, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
       logger.info("Becoming a candidate")
       become(candidate(system.scheduler.scheduleOnce(config.randomElectionTimeout(), self, ElectionTimeout)))
   }
@@ -218,8 +225,8 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
         case RequestVoteResult(_, term, true) if term == currentTerm =>
           votes += 1
           if (votes > nodes.size / 2) {
-            otherNodes.foreach(Simulation.RaftRegionRef !
-              AppendEntries(_, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm), commitIndex, Vector.empty)
+            otherNodes.foreach(nodeId => target(nodeId) !
+              AppendEntries(nodeId, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm), commitIndex, Vector.empty)
             ) //send initial empty AppendEntries RPCs
             nodes.indices.foreach { idx =>
               nextIndex.update(idx, log.size)
@@ -254,7 +261,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
               commitIndex,
               log.slice(index, log.size).toVector
             )
-            Simulation.RaftRegionRef ! rpc
+            target(id) ! rpc
           case (id, index) =>
             //no new entries
             val rpc = AppendEntries(
@@ -266,7 +273,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
               commitIndex,
               Vector.empty
             )
-            Simulation.RaftRegionRef ! rpc
+            target(id) ! rpc
         }
         commitIndex = (commitIndex + 1 until log.size).filter { idx =>
           val replicatedEnough = matchIndex.count(_ >= idx) > nodes.size / 2
@@ -380,7 +387,7 @@ object RaftActor {
   /**
     * Starts the algorithm after the nodes are initialized.
     */
-  final case class NodesInitialized(target: Id, nodes: Vector[Id]) extends ClusterShardedMessage
+  final case class NodesInitialized(target: Id, nodes: Vector[Id], nodeRefs: Option[Vector[ActorRef]] = None) extends ClusterShardedMessage
 
   /**
     * Requests participant's [[ActorStateReport]].
