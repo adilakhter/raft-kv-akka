@@ -1,6 +1,6 @@
 package pl.edu.agh.iosr.raft
 
-import akka.actor.{ActorSystem, Props}
+import akka.actor.ActorSystem
 import akka.testkit._
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
@@ -20,12 +20,12 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
   import scala.concurrent.duration._
 
   val maxElectionTimeout: FiniteDuration = 4.seconds
-  val config = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
+  implicit val config = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
 
   "An RaftActor" must {
     "start uninitialized" in {
       val id = Id(0)
-      val actor = system.actorOf(Props(new RaftActor(id, config)))
+      val actor = system.actorOf(RaftActor.props)
 
       actor ! GetReport
 
@@ -35,9 +35,9 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
 
     "become a follower after initialization" in {
       val id = Id(0)
-      val actor = system.actorOf(Props(new RaftActor(id, config)))
+      val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(Vector(actor))
+      actor ! NodesInitialized(id, Vector(id))
       actor ! GetReport
 
       val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
@@ -46,9 +46,9 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
 
     "become a leader after max election timeout" in {
       val id = Id(0)
-      val actor = system.actorOf(Props(new RaftActor(id, config)))
+      val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(Vector(actor))
+      actor ! NodesInitialized(id, Vector(id))
 
       Thread.sleep(2 * maxElectionTimeout.toMillis)
 
@@ -60,9 +60,9 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
 
     "apply state change" in {
       val id = Id(0)
-      val actor = system.actorOf(Props(new RaftActor(id, config)))
+      val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(Vector(actor))
+      actor ! NodesInitialized(id, Vector(id))
 
       eventually {
         actor ! GetReport
@@ -71,7 +71,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
 
       val key = "k1"
       val value = "v1"
-      actor ! SetValue(key, value)
+      actor ! SetValue(id, key, value)
 
       eventually {
         actor ! GetReport

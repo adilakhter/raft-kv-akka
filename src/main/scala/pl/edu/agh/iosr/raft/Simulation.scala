@@ -1,43 +1,31 @@
 package pl.edu.agh.iosr.raft
 
-import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.actor.{ActorRef, ActorSystem}
+import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.ws.{Message, TextMessage}
+import akka.http.scaladsl.model.ws.Message
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import pl.edu.agh.iosr.raft.RaftActor.{NodesInitialized, SendReport, StatusRef}
 import pl.edu.agh.iosr.raft.command.SetValue
-import pl.edu.agh.iosr.raft.model.{Id, Term}
-import pl.edu.agh.iosr.raft.status._
-import play.api.libs.json._
+import pl.edu.agh.iosr.raft.model.Id
 
 import scala.concurrent.Future
 
-object Simulation extends App {
+object Simulation {
 
   import scala.concurrent.duration._
 
-  val Nodes = 5
-  val Config = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
+  private val Nodes = 5
+  private implicit val Config: RaftConfig = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
 
   implicit private val system: ActorSystem = ActorSystem("raft-kv-akka")
   implicit private val materializer: ActorMaterializer = ActorMaterializer()
-  implicit private val termFormat: Writes[Term] = term => JsNumber(BigDecimal(term.value))
-  implicit private val idFormat: Writes[Id] = id => JsString(id.value.toString)
-  implicit private val stateFormat: Writes[ActorState] = state => JsString(state.productPrefix)
-  implicit private val reportFormat: Writes[ActorStateReport] = Json.writes[ActorStateReport]
 
-  val refs: Vector[ActorRef] = (0 until Nodes).map(idx => system.actorOf(Props(new RaftActor(Id(idx), Config))))(collection.breakOut)
+  //todo
+  private def isSupervisor = true
 
-  val websocketSource: Source[Message, ActorRef] =
-    Source.actorRef[ActorStateReport](1024, OverflowStrategy.dropHead)
-      .map(rep => TextMessage(Json.toJson(rep).toString()))
-      .mapMaterializedValue { ref =>
-        refs.foreach(_ ! StatusRef(ref))
-        ref
-      }
-
-  def serveStatics(): Future[Http.ServerBinding] = {
+  private def serveStatics(websocketSource: Source[Message, Any]): Future[Http.ServerBinding] = {
     import akka.http.scaladsl.server.Directives._
 
     val staticResources =
@@ -56,18 +44,46 @@ object Simulation extends App {
     Http().bindAndHandle(staticResources, "0.0.0.0", 8080)
   }
 
-  val httpServer = serveStatics()
+  ClusterSharding(system).start(
+    typeName = RaftActor.Name,
+    entityProps = RaftActor.props,
+    settings = ClusterShardingSettings(system),
+    extractShardId = RaftActor.extractShardId,
+    extractEntityId = RaftActor.extractEntityId
+  )
 
-  Source.tick(Duration.Zero, 100.millis, SendReport).runForeach(cmd => refs.foreach(_ ! cmd))
+  val RaftRegionRef: ActorRef = ClusterSharding(system).shardRegion(RaftActor.Name)
 
-  refs.foreach(_ ! NodesInitialized(refs))
+  def main(args: Array[String]): Unit = {
 
-  Thread.sleep(20.seconds.toMillis)
+    if (isSupervisor) {
+      val ids: Vector[Id] = (0 until Nodes).map(idx => Id(idx))(collection.breakOut)
 
-  refs.foreach(_ ! SetValue("lol", "abc"))
+      val websocketSource: Source[Message, ActorRef] =
+        Source.actorRef[Message](1024, OverflowStrategy.dropHead)
+          .mapMaterializedValue { ref =>
+            ids.foreach(RaftRegionRef ! StatusRef(_, ref))
+            ref
+          }
 
-  Thread.sleep(20.seconds.toMillis)
+      val httpServer = serveStatics(websocketSource)
 
-  refs.foreach(_ ! SetValue("lol2", "abc"))
-  refs.foreach(_ ! SetValue("lol3", "abc"))
+      ids.foreach { id =>
+        RaftRegionRef ! NodesInitialized(id, ids)
+      }
+
+      Source.tick(Duration.Zero, 100.millis, ids).runForeach(_.foreach(id => RaftRegionRef ! SendReport(id)))
+
+      Thread.sleep(20.seconds.toMillis)
+
+      ids.foreach(RaftRegionRef ! SetValue(_, "lol", "abc"))
+
+      Thread.sleep(20.seconds.toMillis)
+
+      ids.foreach(RaftRegionRef ! SetValue(_, "lol2", "abc"))
+      ids.foreach(RaftRegionRef ! SetValue(_, "lol3", "abc"))
+    }
+  }
+
+
 }

@@ -15,10 +15,11 @@ version := "0.1-SNAPSHOT"
 scalaVersion := "2.12.4"
 
 libraryDependencies ++= Seq(
-  "com.typesafe.akka" %% "akka-remote" % Versions.Akka,
   "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
   "com.typesafe.akka" %% "akka-slf4j" % Versions.Akka,
   "com.typesafe.akka" %% "akka-http" % Versions.AkkaHttp,
+  "com.typesafe.akka" %% "akka-cluster" % Versions.Akka,
+  "com.typesafe.akka" %% "akka-cluster-sharding" % Versions.Akka,
   "com.typesafe.play" %% "play-json" % Versions.PlayJson,
   "ch.qos.logback" % "logback-classic" % Versions.Logback,
   "org.scalatest" %% "scalatest" % Versions.ScalaTest

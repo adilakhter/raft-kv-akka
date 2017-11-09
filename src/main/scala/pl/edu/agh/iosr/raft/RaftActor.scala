@@ -1,15 +1,18 @@
 package pl.edu.agh.iosr.raft
 
-import akka.actor.{Actor, ActorRef, Cancellable, Stash}
+import akka.actor.{Actor, ActorRef, Cancellable, Props, Stash}
+import akka.cluster.sharding.ShardRegion.{ExtractEntityId, ExtractShardId}
 import akka.event.Logging
+import akka.http.scaladsl.model.ws.TextMessage
 import pl.edu.agh.iosr.raft.command.{Command, Init}
 import pl.edu.agh.iosr.raft.model._
 import pl.edu.agh.iosr.raft.status._
+import play.api.libs.json._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.{SeqView, mutable}
 
-class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
+class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
 
   import RaftActor._
   import context._
@@ -17,9 +20,13 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   private val logger = Logging(context.system, this)
 
   override def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
+    def log() = logger.debug("<< {}", msg)
     msg match {
-      case SendReport | GetReport =>
-      case msg => logger.debug("<< {}", msg)
+      case SendReport(_) | GetReport(_) =>
+      case msg: RaftRpc =>
+        sendStatus(msg)
+        log()
+      case _ => log()
     }
     receive.applyOrElse(msg, unhandled)
   }
@@ -70,16 +77,19 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
   var votes = 0
 
-  var nodes: Vector[ActorRef] = _
+  var id: Id = _
 
-  lazy val otherNodes: SeqView[ActorRef, Seq[_]] = nodes.view(0, id.value) ++ nodes.view(id.value + 1, nodes.size)
+  var nodes: Vector[Id] = _
+
+  lazy val otherNodes: SeqView[Id, Seq[_]] = nodes.view(0, id.value) ++ nodes.view(id.value + 1, nodes.size)
 
   private def logIndex: Int = log.size - 1
 
   override def receive: Receive =
     handleStateReport(Uninitialized)
       .orElse {
-        case NodesInitialized(nodes) =>
+        case NodesInitialized(id, nodes) =>
+          this.id = id
           this.nodes = nodes
           unstashAll()
           logger.info("Becoming a follower (init)")
@@ -105,23 +115,27 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     }
   }
 
+  private def sendStatus[T: Writes](msg: T): Unit = {
+    statusRef.foreach(_ ! TextMessage(Json.toJson(msg).toString()))
+  }
+
   private def stateReport(state: ActorState): ActorStateReport =
     ActorStateReport(id, state, currentTerm, commitIndex, lastApplied, this.state.toMap)
 
   var statusRef: Option[ActorRef] = None
   private def handleStateReport(state: ActorState): Receive = {
-    case StatusRef(ref) => statusRef = Some(ref)
-    case SendReport => statusRef.foreach(_ ! stateReport(state))
+    case StatusRef(_, ref) => statusRef = Some(ref)
+    case SendReport => sendStatus(stateReport(state))
     case GetReport => sender() ! stateReport(state)
   }
 
   private def handleAppendEntries(nomination: Cancellable): Receive = {
     //1. Reply false if term < currentTerm (§5.1)
     //2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-    case AppendEntries(term, _, prevLogIndex, prevLogTerm, _, _)
+    case AppendEntries(_, term, leaderId, prevLogIndex, prevLogTerm, _, _)
       if term < currentTerm || log.size <= prevLogIndex || log(prevLogIndex).term != prevLogTerm =>
-      sender() ! AppendEntriesResult(currentTerm, logIndex, success = false)
-    case AppendEntries(term, _, prevLogIndex, _, leaderCommit, entries) =>
+      sender() ! AppendEntriesResult(leaderId, id, currentTerm, logIndex, success = false)
+    case AppendEntries(_, term, leaderId, prevLogIndex, _, leaderCommit, entries) =>
       nomination.cancel()
 
       updateTerm(term)
@@ -149,13 +163,13 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       //5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
       if (leaderCommit > commitIndex) commitIndex = math.min(leaderCommit, log.size - 1)
 
-      sender() ! AppendEntriesResult(currentTerm, logIndex, success = true)
+      sender() ! AppendEntriesResult(leaderId, id, currentTerm, logIndex, success = true)
 
       become(follower())
   }
 
   private def handleVotes(nomination: Cancellable): Receive = {
-    case RequestVote(term, candidateId, lastLogIndex, lastLogTerm) =>
+    case RequestVote(_, term, candidateId, lastLogIndex, lastLogTerm) =>
       //1. Reply false if term < currentTerm (§5.1)
       //2. If votedFor is null or candidateId, and candidate’s log is
       //   at least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
@@ -168,7 +182,7 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
       if (grantVote) votedFor = Some(candidateId)
 
-      sender() ! RequestVoteResult(term, grantVote)
+      sender() ! RequestVoteResult(candidateId, term, grantVote)
       become(follower())
   }
 
@@ -177,8 +191,8 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
       //election timeout elapsed, start election:
       votes = 0
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
-      self ! RequestVoteResult(currentTerm, voteGranted = true) //vote for self
-      otherNodes.foreach(_ ! RequestVote(currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
+      self ! RequestVoteResult(id, currentTerm, voteGranted = true) //vote for self
+      otherNodes.foreach(Simulation.RaftRegionRef ! RequestVote(_, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
       logger.info("Becoming a candidate")
       become(candidate(system.scheduler.scheduleOnce(config.randomElectionTimeout(), self, ElectionTimeout)))
   }
@@ -201,11 +215,11 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         case ElectionTimeout =>
           logger.debug("Becoming a follower (election timeout)")
           become(follower())
-        case RequestVoteResult(term, true) if term == currentTerm =>
+        case RequestVoteResult(_, term, true) if term == currentTerm =>
           votes += 1
           if (votes > nodes.size / 2) {
-            otherNodes.foreach(_ !
-              AppendEntries(currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm), commitIndex, Vector.empty)
+            otherNodes.foreach(Simulation.RaftRegionRef !
+              AppendEntries(_, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm), commitIndex, Vector.empty)
             ) //send initial empty AppendEntries RPCs
             nodes.indices.foreach { idx =>
               nextIndex.update(idx, log.size)
@@ -229,28 +243,30 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         updateLastApplied()
 
         nodes.iterator.zip(nextIndex.iterator).foreach {
-          case (ref, _) if ref == self =>
-          case (ref, index) if log.size > index =>
+          case (id, _) if id == this.id =>
+          case (id, index) if log.size > index =>
             val rpc = AppendEntries(
-              currentTerm,
               id,
+              currentTerm,
+              this.id,
               index - 1,
               log(index - 1).term,
               commitIndex,
               log.slice(index, log.size).toVector
             )
-            ref ! rpc
-          case (ref, index) =>
+            Simulation.RaftRegionRef ! rpc
+          case (id, index) =>
             //no new entries
             val rpc = AppendEntries(
-              currentTerm,
               id,
+              currentTerm,
+              this.id,
               index - 1,
               log(index - 1).term,
               commitIndex,
               Vector.empty
             )
-            ref ! rpc
+            Simulation.RaftRegionRef ! rpc
         }
         commitIndex = (commitIndex + 1 until log.size).filter { idx =>
           val replicatedEnough = matchIndex.count(_ >= idx) > nodes.size / 2
@@ -259,9 +275,9 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
         }.lastOption.getOrElse(commitIndex)
         logger.debug("Commit index: {}", commitIndex)
         become(leader())
-      case AppendEntriesResult(term, logIndex, success) =>
+      case AppendEntriesResult(_, senderId, term, logIndex, success) =>
         heartbeat.cancel()
-        val idx = nodes.indexOf(sender())
+        val idx = nodes.indexOf(senderId)
         if (success) {
           nextIndex(idx) = logIndex + 1
           matchIndex(idx) = logIndex
@@ -279,6 +295,30 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
 
 object RaftActor {
 
+  final val Name: String = "RaftActor"
+
+  def props(implicit config: RaftConfig): Props = {
+    Props(new RaftActor)
+  }
+
+  trait ClusterShardedMessage {
+    def target: Id
+
+    final def extractShardId: String = target.value.toString
+
+    final def extractEntityId: (String, this.type) = (target.value.toString, this)
+  }
+
+  def extractShardId: ExtractShardId = {
+    case msg: ClusterShardedMessage => msg.extractShardId
+  }
+
+  def extractEntityId: ExtractEntityId = {
+    case msg: ClusterShardedMessage => msg.extractEntityId
+  }
+
+  sealed trait RaftRpc extends Product
+
   /**
     * Invoked by leader to replicate log entries (§5.3); also used as a heartbeat (§5.2)
     *
@@ -289,7 +329,8 @@ object RaftActor {
     * @param leaderCommit leader’s commitIndex
     * @param entries      log entries to store (empty for heartbeat; may send more than one for efficiency)
     */
-  final case class AppendEntries(term: Term, leaderId: Id, prevLogIndex: Int, prevLogTerm: Term, leaderCommit: Int, entries: Vector[Entry])
+  final case class AppendEntries(target: Id, term: Term, leaderId: Id, prevLogIndex: Int, prevLogTerm: Term, leaderCommit: Int, entries: Vector[Entry])
+    extends RaftRpc with ClusterShardedMessage
 
   /**
     * Result of AppendEntriesRPC
@@ -298,7 +339,8 @@ object RaftActor {
     * @param logIndex log index after update
     * @param success  true if follower contained entry matching prevLogIndex and prevLogTerm
     */
-  final case class AppendEntriesResult(term: Term, logIndex: Int, success: Boolean)
+  final case class AppendEntriesResult(target: Id, sender: Id, term: Term, logIndex: Int, success: Boolean)
+    extends RaftRpc with ClusterShardedMessage
 
   /**
     * Invoked by candidates to gather votes (§5.2).
@@ -308,7 +350,8 @@ object RaftActor {
     * @param lastLogIndex index of candidate’s last log entry (§5.4)
     * @param lastLogTerm  term of candidate’s last log entry (§5.4)
     */
-  final case class RequestVote(term: Term, candidateId: Id, lastLogIndex: Int, lastLogTerm: Term)
+  final case class RequestVote(target: Id, term: Term, candidateId: Id, lastLogIndex: Int, lastLogTerm: Term)
+    extends RaftRpc with ClusterShardedMessage
 
   /**
     * Result of RequestVoteRPC
@@ -316,27 +359,43 @@ object RaftActor {
     * @param term        currentTerm, for candidate to update itself
     * @param voteGranted true means candidate received vote
     */
-  final case class RequestVoteResult(term: Term, voteGranted: Boolean)
+  final case class RequestVoteResult(target: Id, term: Term, voteGranted: Boolean)
+    extends RaftRpc with ClusterShardedMessage
+
+  object RaftRpc {
+    implicit private val appendEntries: Writes[AppendEntries] = Json.writes[AppendEntries]
+    implicit private val appendEntriesResult: Writes[AppendEntriesResult] = Json.writes[AppendEntriesResult]
+    implicit private val requestVote: Writes[RequestVote] = Json.writes[RequestVote]
+    implicit private val requestVoteResult: Writes[RequestVoteResult] = Json.writes[RequestVoteResult]
+    implicit val raftRpc: Writes[RaftRpc] = msg => JsObject(Map[String, JsValue](
+      "name" -> JsString(msg.productPrefix),
+      "value" -> (msg match {
+        case msg: AppendEntries => appendEntries.writes(msg)
+        case msg: AppendEntriesResult => appendEntriesResult.writes(msg)
+        case msg: RequestVote => requestVote.writes(msg)
+        case msg: RequestVoteResult => requestVoteResult.writes(msg)
+      })))
+  }
 
   /**
     * Starts the algorithm after the nodes are initialized.
     */
-  final case class NodesInitialized(nodes: Vector[ActorRef])
+  final case class NodesInitialized(target: Id, nodes: Vector[Id]) extends ClusterShardedMessage
 
   /**
     * Requests participant's [[ActorStateReport]].
     */
-  final case object GetReport
+  final case class GetReport(target: Id) extends ClusterShardedMessage
 
   /**
     * Requests a status report to current listener reference.
     */
-  final case object SendReport
+  final case class SendReport(target: Id) extends ClusterShardedMessage
 
   /**
     * Updates status listener reference.
     */
-  final case class StatusRef(ref: ActorRef) extends AnyVal
+  final case class StatusRef(target: Id, ref: ActorRef) extends ClusterShardedMessage
 
   /**
     * Message scheduled by a follower to himself to stand for a new election.
