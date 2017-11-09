@@ -2,10 +2,13 @@ package pl.edu.agh.iosr.raft
 
 import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.stream.ActorMaterializer
-import pl.edu.agh.iosr.raft.RaftActor.NodesInitialized
+import akka.http.scaladsl.model.ws.{Message, TextMessage}
+import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.{ActorMaterializer, OverflowStrategy}
+import pl.edu.agh.iosr.raft.RaftActor.{NodesInitialized, SendReport, StatusRef}
 import pl.edu.agh.iosr.raft.command.SetValue
 import pl.edu.agh.iosr.raft.model.Id
+import pl.edu.agh.iosr.raft.status.ActorStateReport
 
 import scala.concurrent.Future
 
@@ -16,16 +19,29 @@ object Simulation extends App {
   val Nodes = 5
   val Config = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
 
-  implicit val system = ActorSystem("raft-kv-akka")
+  implicit private val system: ActorSystem = ActorSystem("raft-kv-akka")
+  implicit private val materializer: ActorMaterializer = ActorMaterializer()
+
+  val refs: Vector[ActorRef] = (0 until Nodes).map(idx => system.actorOf(Props(new RaftActor(Id(idx), Config))))(collection.breakOut)
+
+  val websocketSource: Source[Message, ActorRef] =
+    Source.actorRef[ActorStateReport](1024, OverflowStrategy.dropHead)
+      .map(rep => TextMessage(rep.toString))
+      .mapMaterializedValue { ref =>
+        refs.foreach(_ ! StatusRef(ref))
+        ref
+      }
 
   def serveStatics(): Future[Http.ServerBinding] = {
     import akka.http.scaladsl.server.Directives._
 
-    implicit val materializer: ActorMaterializer = ActorMaterializer()
-
     val staticResources =
       get {
-        pathEndOrSingleSlash {
+        path("ws") {
+          extractUpgradeToWebSocket { upgrade =>
+            complete(upgrade.handleMessagesWithSinkSource(Sink.foreach(println), websocketSource))
+          }
+        } ~ pathEndOrSingleSlash {
           getFromResource("static/index.html")
         } ~ pathPrefix("") {
           getFromResourceDirectory("static")
@@ -37,7 +53,7 @@ object Simulation extends App {
 
   val httpServer = serveStatics()
 
-  val refs: Vector[ActorRef] = (0 until Nodes).map(idx => system.actorOf(Props(new RaftActor(Id(idx), Config))))(collection.breakOut)
+  Source.tick(Duration.Zero, 100.millis, SendReport).runForeach(cmd => refs.foreach(_ ! cmd))
 
   refs.foreach(_ ! NodesInitialized(refs))
 

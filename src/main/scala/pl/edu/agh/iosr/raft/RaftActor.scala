@@ -17,7 +17,10 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
   private val logger = Logging(context.system, this)
 
   override def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
-    logger.debug("<< {}", msg)
+    msg match {
+      case SendReport | GetReport =>
+      case msg => logger.debug("<< {}", msg)
+    }
     receive.applyOrElse(msg, unhandled)
   }
 
@@ -102,8 +105,14 @@ class RaftActor(id: Id, config: RaftConfig) extends Actor with Stash {
     }
   }
 
+  private def stateReport(state: ActorState): ActorStateReport =
+    ActorStateReport(id, state, currentTerm, commitIndex, lastApplied, this.state.toMap)
+
+  var statusRef: Option[ActorRef] = None
   private def handleStateReport(state: ActorState): Receive = {
-    case GetReport => sender() ! ActorStateReport(id, state, currentTerm, commitIndex, lastApplied, this.state.toMap)
+    case StatusRef(ref) => statusRef = Some(ref)
+    case SendReport => statusRef.foreach(_ ! stateReport(state))
+    case GetReport => sender() ! stateReport(state)
   }
 
   private def handleAppendEntries(nomination: Cancellable): Receive = {
@@ -318,6 +327,16 @@ object RaftActor {
     * Requests participant's [[ActorStateReport]].
     */
   final case object GetReport
+
+  /**
+    * Requests a status report to current listener reference.
+    */
+  final case object SendReport
+
+  /**
+    * Updates status listener reference.
+    */
+  final case class StatusRef(ref: ActorRef) extends AnyVal
 
   /**
     * Message scheduled by a follower to himself to stand for a new election.
