@@ -102,7 +102,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
         report.values shouldBe Map(key1 -> value1, key2 -> value2, key3 -> value3)
         report.commitIndex shouldBe 3
         report.lastApplied shouldBe 3
-      }(PatienceConfig(config.broadcastTime * 3, config.broadcastTime), implicitly)
+      }(PatienceConfig(config.broadcastTime * 5, config.broadcastTime), implicitly)
     }
 
 
