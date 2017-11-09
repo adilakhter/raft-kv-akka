@@ -44,3 +44,7 @@ executeTests in Test := {
     testResults.events ++ multiNodeResults.events,
     testResults.summaries ++ multiNodeResults.summaries)
 }
+
+mainClass in assembly := Some("pl.edu.agh.iosr.raft.Simulation")
+assemblyJarName in assembly := "raft.jar"
+test in assembly := {}
