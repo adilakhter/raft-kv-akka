@@ -14,10 +14,17 @@ final case class SetValue(target: Id, key: String, value: String) extends Comman
   override def apply(state: mutable.Map[String, String]): Unit = state += key -> value
 }
 
+object SetValue {
+  implicit val setValueFormat: Writes[SetValue] = Json.writes[SetValue]
+}
+
 case object Init extends Command {
   override def apply(state: mutable.Map[String, String]): Unit = ()
 }
 
 object Command {
-  implicit val format: Writes[Command] = Json.writes[Command]
+  implicit val format: Writes[Command] = {
+    case msg: SetValue => SetValue.setValueFormat.writes(msg)
+    case Init => JsObject(Map("name" -> JsString("Init")))
+  }
 }

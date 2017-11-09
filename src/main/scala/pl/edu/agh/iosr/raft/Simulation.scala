@@ -1,6 +1,7 @@
 package pl.edu.agh.iosr.raft
 
 import akka.actor.{ActorRef, ActorSystem}
+import akka.cluster.Cluster
 import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.ws.Message
@@ -16,14 +17,9 @@ object Simulation {
 
   import scala.concurrent.duration._
 
-  private val Nodes = 5
-  private implicit val Config: RaftConfig = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
-
+  implicit private val Config: RaftConfig = RaftConfig(2.second, 5.seconds, 5.seconds.plus(200.millis))
   implicit private val system: ActorSystem = ActorSystem("raft-kv-akka")
   implicit private val materializer: ActorMaterializer = ActorMaterializer()
-
-  //todo
-  private def isSupervisor = true
 
   private def serveStatics(websocketSource: Source[Message, Any]): Future[Http.ServerBinding] = {
     import akka.http.scaladsl.server.Directives._
@@ -55,9 +51,10 @@ object Simulation {
   val RaftRegionRef: ActorRef = ClusterSharding(system).shardRegion(RaftActor.Name)
 
   def main(args: Array[String]): Unit = {
+    val clusterSettings = Cluster.get(system).settings
 
-    if (isSupervisor) {
-      val ids: Vector[Id] = (0 until Nodes).map(idx => Id(idx))(collection.breakOut)
+    if (args.isEmpty) {
+      val ids: Vector[Id] = (0 until clusterSettings.MinNrOfMembers).map(idx => Id(idx))(collection.breakOut)
 
       val websocketSource: Source[Message, ActorRef] =
         Source.actorRef[Message](1024, OverflowStrategy.dropHead)
