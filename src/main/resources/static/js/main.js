@@ -6,6 +6,8 @@
 var servers = [];
 var messages = [];
 
+var DEBUG = false;
+
 var Server = class {
     constructor(id, state, term, commitIndex, lastApplied, values, message) {
         this.id = id;
@@ -27,25 +29,29 @@ var Message = class {
     }
 };
 
-var message_delete_counter = 10;
-var server_timeout_counter = 10;
+var message_delete_counter = 5;
+var server_timeout_counter = 15;
 
 $( document ).ready(function() {
 
     //WEBSOCKET HANDLERS
     //--------------------------------------------------------
 
-    var simulationWebSocket = new ReconnectingWebSocket("ws://localhost:8080/ws"); //connect to websocket
+    var simulationWebSocket = new WebSocket("ws://localhost:8080/ws"); //connect to websocket
 
     simulationWebSocket.onopen = function (event) {
-        console.log("Connected to server web socket.");
+        if(DEBUG){
+            console.log("Connected to server web socket.");
+        }
     };
 
     simulationWebSocket.onmessage = function (event) {
         var data = JSON.parse(event.data);
         switch(data.name) {
             case undefined:
-                console.log("UpdateState: " + event.data);
+                if(DEBUG){
+                    console.log("UpdateState: " + event.data);
+                }
                 var found = false;
                 for(var i=0; i<servers.length;i++){
                     if(servers[i].id == data.id){
@@ -75,7 +81,9 @@ $( document ).ready(function() {
                 repaint();
                 break;
             case "RequestVote":
-                console.log("RequestVote: " + event.data);
+                if(DEBUG){
+                    console.log("RequestVote: " + event.data);
+                }
                 var message = new Message(data.name, data.value);
                 for(var i=0; i<servers.length;i++){
                     if(servers[i].id == data.value.candidateId){
@@ -85,7 +93,9 @@ $( document ).ready(function() {
                 repaint();
                 break;
             case "RequestVoteResult":
-               console.log("RequestVoteResult: " + event.data);
+                if(DEBUG){
+                    console.log("RequestVoteResult: " + event.data);
+                }
 //                var message = new Message(data.name, data.value);
 //                for(var i=0; i<servers.length;i++){
 //                    if(servers[i].id == data.value.candidateId){
@@ -95,7 +105,9 @@ $( document ).ready(function() {
 //                repaint();
                 break;
             case "AppendEntries":
-                console.log("AppendEntries: " + event.data);
+                if(DEBUG){
+                    console.log("AppendEntries: " + event.data);
+                }
                 var message = new Message(data.name, data.value);
                 for(var i=0; i<servers.length;i++){
                     if(servers[i].id == data.value.leaderId){
@@ -105,7 +117,9 @@ $( document ).ready(function() {
                 repaint();
                 break;
             case "AppendEntriesResult":
-                console.log("AppendEntriesResult: " + event.data);
+                if(DEBUG){
+                    console.log("AppendEntriesResult: " + event.data);
+                }
                 var message = new Message(data.name, data.value);
                 for(var i=0; i<servers.length;i++){
                     if(servers[i].id == data.value.sender){
@@ -185,6 +199,7 @@ $( document ).ready(function() {
     }
 
     var STATE_COLORS = {
+      'Uninitialized' : {value: 'Uninitialized', color: '#ffa8bd'},
       'Leader' : {value: 'Leader', color: '#99ffde'},
       'Follower': {value: 'Follower', color: '#ff966d'},
       'Candidate' : {value: 'Candidate', color: '#8da0cb'},
@@ -228,9 +243,6 @@ $( document ).ready(function() {
           } else {
             $('#append-text').attr('visibility', 'hidden');
             $('#vote-text').attr('visibility', 'hidden');
-            if(server.state == "TimedOut"){
-                $('text.term', serverNode).text("110");
-            }
           }
       });
     };
@@ -239,108 +251,12 @@ $( document ).ready(function() {
     //--------------------------------------------------------
     var util = {};
 
-    // Really big number. Infinity is problematic because
-    // JSON.stringify(Infinity) returns 'null'.
-    util.Inf = 1e300;
-
-    util.value = function(v) {
-      return function() { return v; };
-    };
-
-    // Use with sort for numbers.
-    util.numericCompare = function(a, b) {
-      return a - b;
-    };
-
     util.circleCoord = function(frac, cx, cy, r) {
       var radians = 2 * Math.PI * (0.75 + frac);
       return {
         x: cx + r * Math.cos(radians),
         y: cy + r * Math.sin(radians),
       };
-    };
-
-    util.countTrue = function(bools) {
-      var count = 0;
-      bools.forEach(function(b) {
-        if (b)
-          count += 1;
-      });
-      return count;
-    };
-
-    util.makeMap = function(keys, value) {
-      var m = {};
-      keys.forEach(function(key) {
-        m[key] = value;
-      });
-      return m;
-    };
-
-    util.mapValues = function(m) {
-      return $.map(m, function(v) { return v; });
-    };
-
-    util.clone = function(object) {
-      return jQuery.extend(true, {}, object);
-    };
-
-    // From http://stackoverflow.com/a/6713782
-    util.equals = function(x, y) {
-      if ( x === y ) return true;
-        // if both x and y are null or undefined and exactly the same
-
-      if ( ! ( x instanceof Object ) || ! ( y instanceof Object ) ) return false;
-        // if they are not strictly equal, they both need to be Objects
-
-      if ( x.constructor !== y.constructor ) return false;
-        // they must have the exact same prototype chain, the closest we can do is
-        // test there constructor.
-
-      var p;
-      for ( p in x ) {
-        if ( ! x.hasOwnProperty( p ) ) continue;
-          // other properties were tested using x.constructor === y.constructor
-
-        if ( ! y.hasOwnProperty( p ) ) return false;
-          // allows to compare x[ p ] and y[ p ] when set to undefined
-
-        if ( x[ p ] === y[ p ] ) continue;
-          // if they have the same strict value or identity then they are equal
-
-        if ( typeof( x[ p ] ) !== "object" ) return false;
-          // Numbers, Strings, Functions, Booleans must be strictly equal
-
-        if ( ! util.equals( x[ p ],  y[ p ] ) ) return false;
-          // Objects and Arrays must be tested recursively
-      }
-
-      for ( p in y ) {
-        if ( y.hasOwnProperty( p ) && ! x.hasOwnProperty( p ) ) return false;
-          // allows x[ p ] to be set to undefined
-      }
-      return true;
-    };
-
-    util.greatestLower = function(a, gt) {
-      var bs = function(low, high) {
-        if (high < low)
-          return low - 1;
-        var mid = Math.floor((low + high) / 2);
-        if (gt(a[mid]))
-          return bs(low, mid - 1);
-        else
-          return bs(mid + 1, high);
-      };
-      return bs(0, a.length - 1);
-    };
-
-    util.clamp = function(value, low, high) {
-      if (value < low)
-        return low;
-      if (value > high)
-        return high;
-      return value;
     };
 
 });

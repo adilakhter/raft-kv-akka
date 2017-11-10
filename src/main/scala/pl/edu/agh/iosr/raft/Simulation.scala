@@ -69,7 +69,7 @@ object Simulation {
         RaftRegionRef ! NodesInitialized(id, ids)
       }
 
-      Source.tick(Duration.Zero, 100.millis, ids).runForeach(_.foreach(id => RaftRegionRef ! SendReport(id)))
+      Source.tick(Duration.Zero, 200.millis, ids).runForeach(_.foreach(id => RaftRegionRef ! SendReport(id)))
 
       Thread.sleep(20.seconds.toMillis)
 
