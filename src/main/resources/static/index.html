@@ -22,28 +22,22 @@
 <div class="container-fluid" style="margin-top:50px;">
     <div class="row">
         <div class="col">
+            <div class="affix">
             <svg xmlns="http://www.w3.org/2000/svg" version="1.1" style="border: 0px solid black" width="1024" height="1024">
-                <defs>
-                    <marker id="TriangleOutM" orient="auto" refX="0.0" refY="0.0" style="overflow:visible">
-                        <path d="M 5.77,0.0 L -2.88,5.0 L -2.88,-5.0 L 5.77,0.0 z" transform="scale(0.4)" />
-                    </marker>
-                    <marker id="TriangleOutS-RequestVote" orient="auto" refX="0.0" refY="0.0" style="overflow:visible">
-                        <path d="M 5.77,0.0 L -2.88,5.0 L -2.88,-5.0 L 5.77,0.0 z" transform="scale(0.3)" class="message RequestVote" />
-                    </marker>
-                    <marker id="TriangleOutS-AppendEntries" orient="auto" refX="0.0" refY="0.0" style="overflow:visible">
-                        <path d="M 5.77,0.0 L -2.88,5.0 L -2.88,-5.0 L 5.77,0.0 z" transform="scale(0.3)" class="message AppendEntries" />
-                    </marker>
-                </defs>
                 <circle id="ring" />
                 <g id="messages"></g>
                 <g id="servers"></g>
-                <text id="append-text" x="350" y="370" font-family="Verdana" font-size="35" visibility="hidden">
+                <text id="heartbeat-text" x="350" y="350" font-family="Verdana" font-size="35" visibility="hidden">
+                    Sending heartbeat
+                </text>
+                <text id="append-text" x="350" y="420" font-family="Verdana" font-size="35" visibility="hidden">
                     Appending entries
                 </text>
-                <text id="vote-text" x="350" y="470" font-family="Verdana" font-size="35" visibility="hidden">
+                <text id="vote-text" x="350" y="490" font-family="Verdana" font-size="35" visibility="hidden">
                     Electing master
                 </text>
             </svg>
+            </div>
         </div>
         <div class="col">
             <div id="server-descriptions" style="font-size: 12px;">
@@ -68,6 +62,14 @@
             </div>
             <div class="modal-body">
                 <table class="table">
+                    <tr>
+                        <td>
+                            <div class="circle" style="background-color:#f4ce42;">&nbsp;&nbsp;U</div>
+                        </td>
+                        <td>
+                            - node in 'Uninitialized' state
+                        </td>
+                    </tr>
                     <tr>
                         <td>
                             <div class="circle" style="background-color:#99ffde;">&nbsp;&nbsp;L</div>
@@ -118,10 +120,18 @@
                     </tr>
                     <tr>
                         <td>
+                            <div class="circle" style="background-color:#871c4e;">&nbsp;&nbsp;H</div>
+                        </td>
+                        <td>
+                            - node sending heartbeat
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
                             <div class="circle" style="background-color:#a6d854;">&nbsp;&nbsp;:)</div>
                         </td>
                         <td>
-                            - Append entries success
+                            - heartbeat/append entries success
                         </td>
                     </tr>
                     <tr>
@@ -129,7 +139,23 @@
                             <div class="circle" style="background-color:#ed2f2f;">&nbsp;&nbsp;:(</div>
                         </td>
                         <td>
-                            - Append entries failure
+                            - heartbeat/append entries failure
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="circle" style="background-color:#a6d854;">&nbsp;&nbsp;Yes</div>
+                        </td>
+                        <td>
+                            - vote granted
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="circle" style="background-color:#ed2f2f;">&nbsp;&nbsp;No</div>
+                        </td>
+                        <td>
+                            - vote not granted
                         </td>
                     </tr>
                 </table>
@@ -137,7 +163,6 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary">Save changes</button>
             </div>
         </div>
     </div>
