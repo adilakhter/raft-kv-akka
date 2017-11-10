@@ -18,6 +18,14 @@ object SetValue {
   implicit val setValueFormat: Writes[SetValue] = Json.writes[SetValue]
 }
 
+final case class RemoveValue(target: Id, key: String) extends Command with RaftActor.ClusterShardedMessage {
+  override def apply(state: mutable.Map[String, String]): Unit = state -= key
+}
+
+object RemoveValue {
+  implicit val removeValueFormat: Writes[RemoveValue] = Json.writes[RemoveValue]
+}
+
 case object Init extends Command {
   override def apply(state: mutable.Map[String, String]): Unit = ()
 }
@@ -25,6 +33,7 @@ case object Init extends Command {
 object Command {
   implicit val format: Writes[Command] = {
     case msg: SetValue => SetValue.setValueFormat.writes(msg)
+    case msg: RemoveValue => RemoveValue.removeValueFormat.writes(msg)
     case Init => JsObject(Map("name" -> JsString("Init")))
   }
 }
