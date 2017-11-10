@@ -14,3 +14,14 @@ cache:
 
 script:
   - sbt test
+
+before_deploy:
+  - sbt assembly
+  - openssl aes-256-cbc -K $encrypted_310bca347079_key -iv $encrypted_310bca347079_iv -in .deploy/deploy.pem.enc -out .deploy/deploy.pem -d
+
+deploy:
+  skip_cleanup: true
+  provider: script
+  script: ".deploy/deploy.sh"
+  on:
+    branch: master

@@ -20,7 +20,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
   import scala.concurrent.duration._
 
   val maxElectionTimeout: FiniteDuration = 4.seconds
-  implicit val config = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
+  implicit val config: RaftConfig = RaftConfig(500.millis, 2.seconds, maxElectionTimeout)
 
   "An RaftActor" must {
     "start uninitialized" in {
@@ -37,7 +37,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
       actor ! GetReport(id)
 
       val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
@@ -48,7 +48,7 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
 
       Thread.sleep(2 * maxElectionTimeout.toMillis)
 
@@ -62,16 +62,16 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       val id = Id(0)
       val actor = system.actorOf(RaftActor.props)
 
-      actor ! NodesInitialized(id, Vector(id))
+      actor ! NodesInitialized(id, Vector(id), Some(Vector(actor)))
 
       eventually {
         actor ! GetReport(id)
         receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport].state shouldBe Leader
       }(PatienceConfig(maxElectionTimeout, config.broadcastTime), implicitly)
 
-      val key = "k1"
-      val value = "v1"
-      actor ! SetValue(id, key, value)
+      val key1 = "k1"
+      val value1 = "v1"
+      actor ! SetValue(id, key1, value1)
 
       eventually {
         actor ! GetReport(id)
@@ -84,10 +84,27 @@ class RaftActorTest extends TestKit(ActorSystem("RaftActorTest"))
       eventually {
         actor ! GetReport(id)
         val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
-        report.values shouldBe Map(key -> value)
+        report.values shouldBe Map(key1 -> value1)
         report.commitIndex shouldBe 1
         report.lastApplied shouldBe 1
       }(PatienceConfig(config.broadcastTime * 3, config.broadcastTime), implicitly)
+
+      val key2 = "k2"
+      val value2 = "v2"
+      val key3 = "k3"
+      val value3 = "v3"
+      actor ! SetValue(id, key2, value2)
+      actor ! SetValue(id, key3, value3)
+
+      eventually {
+        actor ! GetReport(id)
+        val report = receiveOne(patienceConfig.timeout).asInstanceOf[ActorStateReport]
+        report.values shouldBe Map(key1 -> value1, key2 -> value2, key3 -> value3)
+        report.commitIndex shouldBe 3
+        report.lastApplied shouldBe 3
+      }(PatienceConfig(config.broadcastTime * 5, config.broadcastTime), implicitly)
     }
+
+
   }
 }
