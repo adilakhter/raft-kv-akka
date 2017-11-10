@@ -37,7 +37,7 @@ $( document ).ready(function() {
     //WEBSOCKET HANDLERS
     //--------------------------------------------------------
 
-    var simulationWebSocket = new WebSocket("ws://localhost:8080/ws"); //connect to websocket
+    var simulationWebSocket = new WebSocket("ws://" + window.location.href + "/ws"); //connect to websocket
 
     simulationWebSocket.onopen = function (event) {
         if(DEBUG){
@@ -96,13 +96,13 @@ $( document ).ready(function() {
                 if(DEBUG){
                     console.log("RequestVoteResult: " + event.data);
                 }
-//                var message = new Message(data.name, data.value);
-//                for(var i=0; i<servers.length;i++){
-//                    if(servers[i].id == data.value.candidateId){
-//                        servers[i].message = message;
-//                    }
-//                }
-//                repaint();
+                var message = new Message(data.name, data.value);
+                for(var i=0; i<servers.length;i++){
+                    if(servers[i].id == data.value.candidateId){
+                        servers[i].message = message;
+                    }
+                }
+                repaint();
                 break;
             case "AppendEntries":
                 if(DEBUG){
@@ -199,13 +199,14 @@ $( document ).ready(function() {
     }
 
     var STATE_COLORS = {
-      'Uninitialized' : {value: 'Uninitialized', color: '#ffa8bd'},
+      'Uninitialized' : {value: 'Uninitialized', color: '#f4ce42'},
       'Leader' : {value: 'Leader', color: '#99ffde'},
       'Follower': {value: 'Follower', color: '#ff966d'},
       'Candidate' : {value: 'Candidate', color: '#8da0cb'},
       'TimedOut': {value: 'TimedOut', color: '#5b585a'},
       'RequestVote': {value: 'RequestVote', color: '#7f402f'},
       'AppendEntries': {value: 'AppendEntries', color: '#da52f2'},
+      'Heartbeat' : {value: 'Heartbeat', color: '#871c4e'},
       'Success': {value: 'Success', color: '#a6d854'},
       'Failure': {value: 'Failure', color: '#ed2f2f'}
     };
@@ -225,10 +226,26 @@ $( document ).ready(function() {
                     $('text.term', serverNode).text("V");
                     $('#vote-text').attr('visibility', 'visible');
                     break;
+                case "RequestVoteResult":
+                    if(server.message.value.voteGranted == true){
+                        $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["Success"].color);
+                        $('text.term', serverNode).text(":)");
+                    } else {
+                        $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["Failure"].color);
+                        $('text.term', serverNode).text(":(");
+                    }
+                    break;
                 case "AppendEntries":
-                    $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["AppendEntries"].color);
-                    $('text.term', serverNode).text("A");
-                    $('#append-text').attr('visibility', 'visible');
+                    if(server.message.value.entries.length == 0){
+                        $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["Heartbeat"].color);
+                        $('text.term', serverNode).text("H");
+                        $('#heartbeat-text').attr('visibility', 'visible');
+                    } else {
+                        $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["AppendEntries"].color);
+                        $('text.term', serverNode).text("A");
+                        $('#append-text').attr('visibility', 'visible');
+                    }
+
                     break;
                 case "AppendEntriesResult":
                     if(server.message.value.success == true){
@@ -241,6 +258,7 @@ $( document ).ready(function() {
                     break;
             }
           } else {
+            $('#heartbeat-text').attr('visibility', 'hidden');
             $('#append-text').attr('visibility', 'hidden');
             $('#vote-text').attr('visibility', 'hidden');
           }
