@@ -98,7 +98,7 @@ $( document ).ready(function() {
                 }
                 var message = new Message(data.name, data.value);
                 for(var i=0; i<servers.length;i++){
-                    if(servers[i].id == data.value.candidateId){
+                    if(servers[i].id == data.value.voter){
                         servers[i].message = message;
                     }
                 }
@@ -229,10 +229,10 @@ $( document ).ready(function() {
                 case "RequestVoteResult":
                     if(server.message.value.voteGranted == true){
                         $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["Success"].color);
-                        $('text.term', serverNode).text(":)");
+                        $('text.term', serverNode).text("Yes");
                     } else {
                         $('circle.background', serverNode).attr('style', 'fill: ' + STATE_COLORS["Failure"].color);
-                        $('text.term', serverNode).text(":(");
+                        $('text.term', serverNode).text("No");
                     }
                     break;
                 case "AppendEntries":
