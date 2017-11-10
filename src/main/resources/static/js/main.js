@@ -37,7 +37,7 @@ $( document ).ready(function() {
     //WEBSOCKET HANDLERS
     //--------------------------------------------------------
 
-    var simulationWebSocket = new WebSocket("ws://" + window.location.href + "/ws"); //connect to websocket
+    var simulationWebSocket = new WebSocket("ws://" + window.location.hostname+(window.location.port ? ':'+window.location.port: '') + "/ws"); //connect to websocket
 
     simulationWebSocket.onopen = function (event) {
         if(DEBUG){
@@ -192,7 +192,7 @@ $( document ).ready(function() {
               "<tr><td>Term:</td><td>" + server.term + "</td></tr>" +
               "<tr><td>Commit index:</td><td>" + server.commitIndex + "</td></tr>" +
               "<tr><td>Last applied:</td><td>" + server.lastApplied + "</td></tr>" +
-              "<tr><td>Values:</td><td>" + JSON.stringify(server.values) + "</td></tr></table>" +
+              "<tr><td>Values:</td><td>" + JSON.stringify(server.values).replace(/,/g, "<br>").replace("{", "").replace("}","") + "</td></tr></table>" +
               "</div>");
             });
         renderServers(false);
