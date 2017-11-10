@@ -8,10 +8,13 @@ import akka.http.scaladsl.model.ws.Message
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import pl.edu.agh.iosr.raft.RaftActor.{NodesInitialized, SendReport, StatusRef}
-import pl.edu.agh.iosr.raft.command.SetValue
+import pl.edu.agh.iosr.raft.command.{RemoveValue, SetValue}
 import pl.edu.agh.iosr.raft.model.Id
 
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.Future
+import scala.util.Random
 
 object Simulation {
 
@@ -71,14 +74,41 @@ object Simulation {
 
       Source.tick(Duration.Zero, 200.millis, ids).runForeach(_.foreach(id => RaftRegionRef ! SendReport(id)))
 
-      Thread.sleep(20.seconds.toMillis)
+      val state = mutable.Map.empty[String, String]
 
-      ids.foreach(RaftRegionRef ! SetValue(_, "lol", "abc"))
-
-      Thread.sleep(20.seconds.toMillis)
-
-      ids.foreach(RaftRegionRef ! SetValue(_, "lol2", "abc"))
-      ids.foreach(RaftRegionRef ! SetValue(_, "lol3", "abc"))
+      Source.tick(20.seconds, 15.seconds, ids).runForeach { ids =>
+        val added = ListBuffer.empty[(String, String)]
+        val removed = ListBuffer.empty[String]
+        val sets = (0 to Random.nextInt(5)).map { i =>
+          val rand = BigInt.probablePrime(100, Random).toString(16)
+          val key = "k" + rand
+          val value = "v" + rand
+          added += key -> value
+          SetValue(_: Id, key, value)
+        }
+        val removes = (0 to Random.nextInt(5)).flatMap { _ =>
+          if (state.nonEmpty) {
+            val idx = Random.nextInt(state.size)
+            val (key, _) = state.iterator.drop(idx).next()
+            removed += key
+            Some(RemoveValue(_: Id, key))
+          } else None
+        }
+        for {
+          set <- sets
+          id <- ids
+        } {
+          RaftRegionRef ! set(id)
+        }
+        for {
+          remove <- removes
+          id <- ids
+        } {
+          RaftRegionRef ! remove(id)
+        }
+        state ++= added
+        state --= removed
+      }
     }
   }
 
