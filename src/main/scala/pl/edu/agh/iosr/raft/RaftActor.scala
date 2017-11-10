@@ -189,7 +189,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
 
       if (grantVote) votedFor = Some(candidateId)
 
-      sender() ! RequestVoteResult(candidateId, term, grantVote)
+      sender() ! RequestVoteResult(candidateId, id, term, grantVote)
       become(follower())
   }
 
@@ -198,7 +198,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
       //election timeout elapsed, start election:
       votes = 0
       updateTerm(currentTerm.copy(currentTerm.value + 1)) //increment currentTerm
-      self ! RequestVoteResult(id, currentTerm, voteGranted = true) //vote for self
+      self ! RequestVoteResult(id, id, currentTerm, voteGranted = true) //vote for self
       otherNodes.foreach(nodeId => target(nodeId) ! RequestVote(nodeId, currentTerm, id, logIndex, log.lastOption.map(_.term).getOrElse(currentTerm))) //send RequestVote RPCs to all other servers
       logger.info("Becoming a candidate")
       become(candidate(system.scheduler.scheduleOnce(config.randomElectionTimeout(), self, ElectionTimeout)))
@@ -222,7 +222,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
         case ElectionTimeout =>
           logger.debug("Becoming a follower (election timeout)")
           become(follower())
-        case RequestVoteResult(_, term, true) if term == currentTerm =>
+        case RequestVoteResult(_, _, term, true) if term == currentTerm =>
           votes += 1
           if (votes > nodes.size / 2) {
             otherNodes.foreach(nodeId => target(nodeId) !
@@ -366,7 +366,7 @@ object RaftActor {
     * @param term        currentTerm, for candidate to update itself
     * @param voteGranted true means candidate received vote
     */
-  final case class RequestVoteResult(target: Id, term: Term, voteGranted: Boolean)
+  final case class RequestVoteResult(target: Id, voter: Id, term: Term, voteGranted: Boolean)
     extends RaftRpc with ClusterShardedMessage
 
   object RaftRpc {
