@@ -20,7 +20,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
   private val logger = Logging(context.system, this)
 
   override def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
-    def log() = logger.debug("<< {}", msg)
+    def log(): Unit = logger.debug("<< {}", msg)
     msg match {
       case SendReport(_) | GetReport(_) =>
       case msg: RaftRpc =>
@@ -62,7 +62,7 @@ class RaftActor(implicit config: RaftConfig) extends Actor with Stash {
   /**
     * current state machine state
     */
-  var state: mutable.Map[String, String] = mutable.HashMap.empty
+  val state: mutable.Map[String, String] = mutable.HashMap.empty
 
   //volatile state on leaders
   /**

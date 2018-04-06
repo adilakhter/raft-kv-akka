@@ -2,27 +2,27 @@ import com.typesafe.sbt.SbtMultiJvm.multiJvmSettings
 import sbt.protocol.testing.TestResult.{Failed, Passed}
 
 val Versions = new {
-  val Akka = "2.5.6"
-  val AkkaHttp = "10.0.10"
-  val PlayJson = "2.6.6"
-  val ScalaTest = "3.0.4"
+  val Akka = "2.5.11"
+  val AkkaHttp = "10.1.1"
+  val PlayJson = "2.6.9"
   val Logback = "1.2.3"
+  val ScalaTest = "3.0.5"
 }
 
 name := "raft-kv-akka"
 organization := "pl.edu.agh"
 version := "0.1-SNAPSHOT"
-scalaVersion := "2.12.4"
+scalaVersion := "2.12.5"
 
 libraryDependencies ++= Seq(
-  "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka,
   "com.typesafe.akka" %% "akka-slf4j" % Versions.Akka,
   "com.typesafe.akka" %% "akka-http" % Versions.AkkaHttp,
   "com.typesafe.akka" %% "akka-cluster" % Versions.Akka,
   "com.typesafe.akka" %% "akka-cluster-sharding" % Versions.Akka,
   "com.typesafe.play" %% "play-json" % Versions.PlayJson,
   "ch.qos.logback" % "logback-classic" % Versions.Logback,
-  "org.scalatest" %% "scalatest" % Versions.ScalaTest
+  "com.typesafe.akka" %% "akka-multi-node-testkit" % Versions.Akka % Test,
+  "org.scalatest" %% "scalatest" % Versions.ScalaTest % Test,
 )
 
 //enable multi-jvm testing
